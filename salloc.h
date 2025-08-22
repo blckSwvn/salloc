@@ -25,9 +25,9 @@ struct master {
 
 // API functions
 bool sinit(master *m, size_t requested, bool use_mmap);
-void *salloc(master *m, size_t requested);
 void sfree(void *ptr, master *m);
-void *srealloc(node *n, master *m, size_t requested);
+void *salloc(master *m, size_t requested);
+void *srealloc(void *ptr, master *m, size_t requested);
 
 void dump_m(master *m);
 void dump_f(master *m);

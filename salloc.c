@@ -56,32 +56,30 @@ void internal_skill(master *m) {
     }
 }
 void sfree(void *ptr, master *m){
-	if(ptr == m->base){
-		internal_skill(m);
-		return;
-	}
+    if(ptr == m->base){
+        internal_skill(m);
+        return;
+    }
 
-	node *n = (node *)((char *)ptr - offsetof(node, data));
-	node *curr = n;
-	node *next = m->freelist;
-	n->dead = true;
-	n->next = next;
-	m->freelist = n;
-	n->prev = NULL;
-	next->prev = n;
+    node *n = (node *)((char *)ptr - offsetof(node, data));
+    node *curr = n;
+    node *next = m->freelist;
 
-	next = (node *)((char *)curr + curr->length + sizeof(node));
+    n->dead = true;
+    n->next = next;
+    n->prev = NULL;
+    m->freelist = n;
 
-	while((char *)next < (char *)m->base + m->memUsed && next->dead == true){
-		if(next->prev->next){
-			next->prev->next = next->next;
-		}
-		if(next->next){
-			next->next->prev = next->prev;
-		}
-		curr->length += next->length + sizeof(node);
-		next = (node *)((char *)next + next->length + sizeof(node));
-	}
+    if(next) next->prev = n;
+
+    next = (node *)((char *)curr + sizeof(node) + curr->length);
+    while(next && (char *)next < (char *)m->end && next->dead){
+        if(next->prev) next->prev->next = next->next;
+        if(next->next) next->next->prev = next->prev;
+
+        curr->length += sizeof(node) + next->length;
+        next = (node *)((char *)next + sizeof(node) + next->length);
+    }
 }
 
 void *salloc(master *m, size_t requested){
@@ -126,6 +124,7 @@ void *salloc(master *m, size_t requested){
 void *srealloc(void *ptr, master *m, size_t requested){
 node *n = (node *)((char *)ptr - offsetof(node, data));
 node *next = (node *)((char *)n + n->length + sizeof(node));
+if ((char*)next >= (char*)m->end) next = NULL;
 if (next->dead){
 	n->length = n->length + next->length + sizeof(node);
 	return n->data;
@@ -175,25 +174,23 @@ void dump_f(master *m){
 }
 
 void dump_a(master *m){
-	node *curr = NULL;
-	dump_m(m);
-	printf("\n");
-	if( m && m->base){
-		char *ptr;
-		size_t nmr = 0;
-		ptr = (char *)m->base;
-		char *end = (char *)m->base + m->memUsed;
-		printf(" ==== all nodes ====\n");
-		while(ptr > end) {
-			node *curr = (node*)ptr;
-			printf(" %zu | node: %p | %s | size: %zu | next: %p | prev: %p\n",
-			nmr, curr, curr->dead ? "FREE" : "USED", curr->length, curr->next, curr->prev);
+    if(!m || !m->base) return;
 
-			nmr++;
-			ptr += sizeof(node) + curr->length;
-		};
-		printf("\n");
-	} else {
-		printf("m->base = NULL or m == NULL");
-	}
+    dump_m(m);
+
+    char *ptr = (char *)m->base;
+    char *end = ptr + m->memUsed;
+    size_t nmr = 0;
+    node *curr;
+
+    printf("\n ==== all nodes ====\n");
+    while(ptr < end) {
+        curr = (node*)ptr;
+        printf(" %zu | node: %p | %s | size: %zu | next: %p | prev: %p\n",
+               nmr, curr, curr->dead ? "FREE" : "USED", curr->length, curr->next, curr->prev);
+
+        ptr += sizeof(node) + curr->length;
+        nmr++;
+    }
+    printf("\n");
 }

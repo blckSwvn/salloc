@@ -1,65 +1,37 @@
 #include <stdio.h>
-#include "salloc.h"  // your allocator header
-
-typedef struct list {
-    int value;
-    struct list *next;
-} list;
+#include "salloc.h"
 
 int main() {
     master m;
-    size_t pool_size = 1024;
-
-    // Initialize a pool (using sbrk for example)
-    if (!sinit(&m, pool_size, false)) {
-        printf("Failed to initialize memory pool\n");
+    if(!sinit(&m, 1024, false)) {
+        printf("Pool init failed\n");
         return 1;
     }
 
     printf("=== Pool after init ===\n");
     dump_a(&m);
 
-    // Allocate 10 list nodes
-    list *head = NULL;
-    list *prev = NULL;
-    for (int i = 0; i < 10; i++) {
-        list *node = salloc(&m, sizeof(list));
-        if (!node) {
-            printf("Allocation failed at index %d\n", i);
-            break;
-        }
-        node->value = i;
-        node->next = NULL;
-
-        if (!head) head = node;
-        if (prev) prev->next = node;
-        prev = node;
+    int *arr[10];
+    for(int i=0;i<10;i++){
+        arr[i] = salloc(&m, sizeof(int));
+        if(arr[i]) *arr[i] = i * 10;
     }
 
-    printf("\n=== Pool after allocations ===\n");
+    printf("=== Pool after allocations ===\n");
     dump_a(&m);
 
-    // Free every other node
-    list *curr = head;
-    int idx = 0;
-    while (curr) {
-        if (idx % 2 == 0) sfree(curr, &m);
-        curr = curr->next;
-        idx++;
+    for(int i=0;i<10;i++){
+        if(i%2==0 && arr[i]) sfree(arr[i], &m); // free every second node
     }
 
-    printf("\n=== Pool after freeing every other node ===\n");
+    printf("=== Pool after frees ===\n");
     dump_a(&m);
 
-    // Reallocate first node to bigger size
-    if (head) {
-        void *new_ptr = srealloc((void *)head, &m, sizeof(list) * 2);
-        if (new_ptr) {
-            printf("\nReallocated first node to double size\n");
-        }
-    }
-
-    printf("\n=== Pool after realloc ===\n");
+    void *temp = salloc(&m, 25);
+    dump_a(&m);
+    sfree (temp, &m);
+    dump_a(&m);
+    void *temp2 = salloc(&m, sizeof(int));
     dump_a(&m);
 
     return 0;
