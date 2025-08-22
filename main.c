@@ -1,101 +1,66 @@
 #include <stdio.h>
-#include <unistd.h>
-#include <stdbool.h>
-#include <string.h>
+#include "salloc.h"  // your allocator header
 
-typedef struct node {
-	bool dead;
-	size_t length;
-	struct node *next;
-	char data[];
-} node;
+typedef struct list {
+    int value;
+    struct list *next;
+} list;
 
-typedef struct master {
-	void *base;
-	size_t memUsed;
-	size_t memFree;
-	node *freelist;
-	node *tail;
-} master;
+int main() {
+    master m;
+    size_t pool_size = 1024;
 
-void poolInit(master *m, size_t requested){
-	m->base = sbrk(requested);
-	m->memFree = requested - sizeof(master);
-	m->memUsed = 0;
-	m->freelist = NULL;
-	m->tail = NULL;
-}
+    // Initialize a pool (using sbrk for example)
+    if (!sinit(&m, pool_size, false)) {
+        printf("Failed to initialize memory pool\n");
+        return 1;
+    }
 
-void poolKill(master *m){
-	brk(m->base = 0);
-}
+    printf("=== Pool after init ===\n");
+    dump_a(&m);
 
-void free(node *n, master *m){
-	node *curr = n;
-	node *next = (node *)((char *)curr + curr->length + sizeof(node));
-	n->dead = true;
-	n->next = m->freelist;
-	m->freelist = n;
-	while((char *)next < (char *)m->base + m->memUsed && next->dead == true){
-		next->next = NULL;
-		curr->length += next->length + sizeof(node);
-		next = (node *)((char *)next + next->length + sizeof(node));
-	}
-}
+    // Allocate 10 list nodes
+    list *head = NULL;
+    list *prev = NULL;
+    for (int i = 0; i < 10; i++) {
+        list *node = salloc(&m, sizeof(list));
+        if (!node) {
+            printf("Allocation failed at index %d\n", i);
+            break;
+        }
+        node->value = i;
+        node->next = NULL;
 
-void *alloc(master *m, size_t requested){
-	node *curr = m->freelist;
-	while(curr){
-		if(curr->dead && curr->length > requested){
-			curr->dead = false;
-			break;
-		}
-		curr = curr->next;
-	}
-	if(curr){
-		if(curr->length >= requested * 1.5){
-			node *splitN = (struct node*)((char *)m->tail + sizeof(node) + m->tail->length);
-			splitN->length = curr->length - requested;
-			curr->length = requested;
-			splitN->next = NULL;
-			splitN->dead = true;
-			poolFree(splitN, m);
-		}
-		return curr->data;
-	} else {
-		if(m->memFree < requested+sizeof(node)){
-			return NULL;
-		}
-		m->memFree = m->memFree - sizeof(node) + requested;
-		m->memUsed = m->memUsed + requested + sizeof(node);
-		node *newN = (struct node*)((char *)m->tail + sizeof(node) + m->tail->length);
-		m->tail = newN;
-		newN->length = requested;
-		newN->dead = false;
-		newN->next = NULL;
-		return newN->data;
-	}
-}
+        if (!head) head = node;
+        if (prev) prev->next = node;
+        prev = node;
+    }
 
-void *Realloc(node *n, master *m, size_t requested){
-node *next = (node *)((char *)n + n->length + sizeof(node));
-if (next->dead){
-	n->length = n->length + next->length + sizeof(node);
-	return n->data;
-} else {
-	if(m->memFree >= requested+sizeof(node)){
-		node *newN = alloc(m, requested);
-		if(newN){
-			memcpy(newN->data, n->data, n->length);
-			poolFree(n, m);
-			return newN->data;
-		}
-		return NULL;
-	}
-}
-return NULL;
-}
+    printf("\n=== Pool after allocations ===\n");
+    dump_a(&m);
 
-int main(){
-	master m;
+    // Free every other node
+    list *curr = head;
+    int idx = 0;
+    while (curr) {
+        if (idx % 2 == 0) sfree(curr, &m);
+        curr = curr->next;
+        idx++;
+    }
+
+    printf("\n=== Pool after freeing every other node ===\n");
+    dump_a(&m);
+
+    // Reallocate first node to bigger size
+    if (head) {
+        void *new_ptr = srealloc((void *)head, &m, sizeof(list) * 2);
+        if (new_ptr) {
+            printf("\nReallocated first node to double size\n");
+        }
+    }
+
+    printf("\n=== Pool after realloc ===\n");
+    dump_a(&m);
+
+    return 0;
 }
