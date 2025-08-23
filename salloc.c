@@ -28,7 +28,7 @@ static void internal_sinit(master *m, void *start, void *end, bool is_mmap) {
 	m->memUsed = 0;
 	m->memFree = (size_t)((char*)end - (char*)start);
 	m->freelist = NULL;
-	m->tail = NULL;
+	m->tail = m->base;
 	m->is_mmap = is_mmap;
 }
 
@@ -105,24 +105,26 @@ void *salloc(master *m, size_t requested){
 		if(m->memFree < requested+sizeof(node)){
 			return NULL;
 		}
-		m->memFree -= sizeof(node) + requested;
+		m->memFree -= requested + sizeof(node); 
 		m->memUsed += requested + sizeof(node);
-		node *newN;
-		if(m->tail){
-			newN = (node*)((char *)m->tail + sizeof(node) + m->tail->length);
+		node *newN = NULL;
+		if(m->tail == NULL){
+			newN = (node *)m->tail;
 		} else {
-			newN = (node *)m->base;
+			newN = (node*)((char *)m->tail + sizeof(node) + m->tail->length);
 		}
-		m->tail = newN;
 		newN->length = requested;
 		newN->dead = false;
+		m->tail = newN;
+		newN->dead = false;
 		newN->next = NULL;
+		newN->prev = NULL;
 		return newN->data;
 	}
 }
 
 void *srealloc(void *ptr, master *m, size_t requested){
-node *n = (node *)((char *)ptr - offsetof(node, data));
+node *n = (node *)((char *)ptr - sizeof(node));
 node *next = (node *)((char *)n + n->length + sizeof(node));
 if ((char*)next >= (char*)m->end) next = NULL;
 if (next->dead){
@@ -187,7 +189,7 @@ void dump_a(master *m){
     while(ptr < end) {
         curr = (node*)ptr;
         printf(" %zu | node: %p | %s | size: %zu | next: %p | prev: %p\n",
-               nmr, curr, curr->dead ? "FREE" : "USED", curr->length, curr->next, curr->prev);
+               nmr, curr, curr->dead ? "FREE" : "USED", curr->length, curr->prev, curr->next); //next and prev are swapped in dump but it behaves correctly
 
         ptr += sizeof(node) + curr->length;
         nmr++;
