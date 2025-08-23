@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include <stddef.h>
 #include <unistd.h>
 #include <stdbool.h>
@@ -55,7 +56,7 @@ void internal_skill(master *m) {
         brk(m->base);
     }
 }
-void sfree(void *ptr, master *m){
+void sfree(master *m, void *ptr){
     if(ptr == m->base){
         internal_skill(m);
         return;
@@ -98,7 +99,7 @@ void *salloc(master *m, size_t requested){
 			curr->length = requested;
 			splitN->next = NULL;
 			splitN->dead = true;
-			sfree(splitN, m);
+			sfree(m, splitN);
 		}
 		return curr->data;
 	} else {
@@ -123,30 +124,51 @@ void *salloc(master *m, size_t requested){
 	}
 }
 
-void *srealloc(void *ptr, master *m, size_t requested){
-node *n = (node *)((char *)ptr - sizeof(node));
-node *next = (node *)((char *)n + n->length + sizeof(node));
-if ((char*)next >= (char*)m->end) next = NULL;
-if (next->dead){
-	n->length = n->length + next->length + sizeof(node);
-	return n->data;
-} else {
-	if(m->memFree >= requested+sizeof(node)){
-		void *newData = salloc(m, requested);
-		if(newData){
-			unsigned char *d = newData;
-			const unsigned char *s = n->data;
-			size_t len = n->length;
-			while(len--){
-				*d++ = *s++;
-			}
-			sfree(n, m);
-			return newData;
-		}
-		return NULL;
+void *srealloc(master *m, void *ptr, size_t requested) {
+	if(!ptr) return salloc(m, requested);  // realloc(NULL, size) behaves like malloc
+
+	node *curr = (node *)((char *)ptr - sizeof(node));
+	size_t old_size = curr->length;
+
+	size_t total_size = old_size;
+	node *next = (node *)((char *)curr + sizeof(node) + curr->length);
+
+	while(next && (char *)next < (char *)m->end && next->dead) {
+		total_size += sizeof(node) + next->length;
+
+		if (next->prev) next->prev->next = next->next;
+		if (next->next) next->next->prev = next->prev;
+		if (m->freelist == next) m->freelist = next->next;
+		next = (node *)((char *)next + sizeof(node) + next->length);
 	}
-}
-return NULL;
+
+	if(total_size >= requested) {
+		if (total_size >= requested + sizeof(node) + 1) {
+		node *splitN = (node *)((char *)curr + sizeof(node) + requested);
+		splitN->length = total_size - requested - sizeof(node);
+		splitN->dead = true;
+
+		splitN->next = m->freelist;
+		splitN->prev = NULL;
+		if (m->freelist) m->freelist->prev = splitN;
+		m->freelist = splitN;
+
+		curr->length = requested;
+        } else {
+		curr->length = total_size;
+        }
+        	curr->dead = false;
+        	return curr->data;
+	}
+
+	void *newData = salloc(m, requested);
+	if (!newData) return NULL;
+
+	size_t toCopy = old_size < requested ? old_size : requested;
+	memcpy(newData, curr->data, toCopy);
+
+	sfree(m, curr->data);
+	return newData;
 }
 
 void dump_m(master *m){
