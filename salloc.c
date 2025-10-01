@@ -34,53 +34,53 @@ static void internal_sinit(master *m, void *start, void *end, bool is_mmap) {
 }
 
 bool sinit(master *m, size_t size, bool use_mmap) {
-    void *start = NULL;
-    if (use_mmap) {
-        start = mmap(NULL, size, PROT_READ | PROT_WRITE,
-                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (start == MAP_FAILED) return false;
-    } else {
-        start = sbrk(size);
-        if (start == (void*) -1) return false;
-    }
+	void *start = NULL;
+	if (use_mmap) {
+		start = mmap(NULL, size, PROT_READ | PROT_WRITE,
+				MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+		if (start == MAP_FAILED) return false;
+	} else {
+		start = sbrk(size);
+		if (start == (void*) -1) return false;
+	}
 
-    internal_sinit(m, start, (char*)start + size, use_mmap);
-    return true;
+	internal_sinit(m, start, (char*)start + size, use_mmap);
+	return true;
 }
 
 void internal_skill(master *m) {
-    size_t size = (char*)m->end - (char*)m->base;
-    if (m->is_mmap) {
-        munmap(m->base, size);
-    } else {
-        brk(m->base);
-    }
+	size_t size = (char*)m->end - (char*)m->base;
+	if (m->is_mmap) {
+		munmap(m->base, size);
+	} else {
+		brk(m->base);
+	}
 }
 void sfree(master *m, void *ptr){
-    if(ptr == m->base){
-        internal_skill(m);
-        return;
-    }
+	if(ptr == m->base){
+		internal_skill(m);
+		return;
+	}
 
-    node *n = (node *)((char *)ptr - offsetof(node, data));
-    node *curr = n;
-    node *next = m->freelist;
+	node *n = (node *)((char *)ptr - offsetof(node, data));
+	node *curr = n;
+	node *next = m->freelist;
 
-    n->dead = true;
-    n->next = next;
-    n->prev = NULL;
-    m->freelist = n;
+	n->dead = true;
+	n->next = next;
+	n->prev = NULL;
+	m->freelist = n;
 
-    if(next) next->prev = n;
+	if(next) next->prev = n;
 
-    next = (node *)((char *)curr + sizeof(node) + curr->length);
-    while(next && (char *)next < (char *)m->end && next->dead){
-        if(next->prev) next->prev->next = next->next;
-        if(next->next) next->next->prev = next->prev;
+	next = (node *)((char *)curr + sizeof(node) + curr->length);
+	while(next && (char *)next < (char *)m->end && next->dead){
+		if(next->prev) next->prev->next = next->next;
+		if(next->next) next->next->prev = next->prev;
 
-        curr->length += sizeof(node) + next->length;
-        next = (node *)((char *)next + sizeof(node) + next->length);
-    }
+		curr->length += sizeof(node) + next->length;
+		next = (node *)((char *)next + sizeof(node) + next->length);
+	}
 }
 
 void *salloc(master *m, size_t requested){
@@ -144,21 +144,21 @@ void *srealloc(master *m, void *ptr, size_t requested) {
 
 	if(total_size >= requested) {
 		if (total_size >= requested + sizeof(node) + 1) {
-		node *splitN = (node *)((char *)curr + sizeof(node) + requested);
-		splitN->length = total_size - requested - sizeof(node);
-		splitN->dead = true;
+			node *splitN = (node *)((char *)curr + sizeof(node) + requested);
+			splitN->length = total_size - requested - sizeof(node);
+			splitN->dead = true;
 
-		splitN->next = m->freelist;
-		splitN->prev = NULL;
-		if (m->freelist) m->freelist->prev = splitN;
-		m->freelist = splitN;
+			splitN->next = m->freelist;
+			splitN->prev = NULL;
+			if (m->freelist) m->freelist->prev = splitN;
+			m->freelist = splitN;
 
-		curr->length = requested;
-        } else {
-		curr->length = total_size;
-        }
-        	curr->dead = false;
-        	return curr->data;
+			curr->length = requested;
+		} else {
+			curr->length = total_size;
+		}
+		curr->dead = false;
+		return curr->data;
 	}
 
 	void *newData = salloc(m, requested);
@@ -175,7 +175,7 @@ void dump_m(master *m){
 	if(m){
 		printf("==== master ====\n");
 		printf("master: %p | base: %p | end: %p | used: %zu | free: %zu | freelist: %p | tail: %p\n",
-		m, m->base, m->end, m->memUsed, m->memFree, m->freelist, m->tail);
+				m, m->base, m->end, m->memUsed, m->memFree, m->freelist, m->tail);
 	} else {
 		printf("m = NULL");
 	}
@@ -188,7 +188,7 @@ void dump_f(master *m){
 		while(curr){
 			printf("==== free list ====\n");
 			printf("node: %p | %s | size: %zu | next: %p | prev: %p\n",
-			curr, curr->dead ? "FREE" : "USED", curr->length, curr->next, curr->prev);
+					curr, curr->dead ? "FREE" : "USED", curr->length, curr->next, curr->prev);
 			curr = curr->next;
 		}
 		printf("\n");
@@ -198,23 +198,23 @@ void dump_f(master *m){
 }
 
 void dump_a(master *m){
-    if(!m || !m->base) return;
+	if(!m || !m->base) return;
 
-    dump_m(m);
+	dump_m(m);
 
-    char *ptr = (char *)m->base;
-    char *end = ptr + m->memUsed;
-    size_t nmr = 0;
-    node *curr;
+	char *ptr = (char *)m->base;
+	char *end = ptr + m->memUsed;
+	size_t nmr = 0;
+	node *curr;
 
-    printf("\n ==== all nodes ====\n");
-    while(ptr < end) {
-        curr = (node*)ptr;
-        printf(" %zu | node: %p | %s | size: %zu | next: %p | prev: %p\n",
-               nmr, curr, curr->dead ? "FREE" : "USED", curr->length, curr->prev, curr->next); //next and prev are swapped in dump but it behaves correctly
+	printf("\n ==== all nodes ====\n");
+	while(ptr < end) {
+		curr = (node*)ptr;
+		printf(" %zu | node: %p | %s | size: %zu | next: %p | prev: %p\n",
+				nmr, curr, curr->dead ? "FREE" : "USED", curr->length, curr->prev, curr->next); //next and prev are swapped in dump but it behaves correctly
 
-        ptr += sizeof(node) + curr->length;
-        nmr++;
-    }
-    printf("\n");
+		ptr += sizeof(node) + curr->length;
+		nmr++;
+	}
+	printf("\n");
 }
