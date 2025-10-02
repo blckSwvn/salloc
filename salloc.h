@@ -10,8 +10,6 @@ typedef struct master master;
 struct node {
     bool dead;
     size_t length;
-    node *next;
-    node *prev;
     char data[];
 };
 
