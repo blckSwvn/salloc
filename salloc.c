@@ -6,10 +6,7 @@
 #include <sys/mman.h>
 
 typedef struct node {
-	bool dead;
 	size_t length;
-	struct node *next;
-	struct node *prev;
 	char data[];
 } node;
 
@@ -55,6 +52,7 @@ void internal_skill(master *m) {
 	} else {
 		brk(m->base);
 	}
+
 }
 void sfree(master *m, void *ptr){
 	if(ptr == m->base){
@@ -64,41 +62,79 @@ void sfree(master *m, void *ptr){
 
 	node *n = (node *)((char *)ptr - offsetof(node, data));
 	node *curr = n;
-	node *next = m->freelist;
+	char *end = (char *)n + sizeof(node) + n->length;
 
-	n->dead = true;
-	n->next = next;
-	n->prev = NULL;
+
+	node **c_prev = (node **)(end - 2 * sizeof(node*));
+	node **c_next = (node **)(end - 1 * sizeof(node*));
+	if(m->freelist) {
+		*c_next = m->freelist;
+		*c_prev = NULL;
+		if(m->freelist) { // make sure freelist head is valid
+			char *freelist_end = (char*)m->freelist + sizeof(node) + m->freelist->length;
+			node **freelist_prev = (node **)(freelist_end - 2 * sizeof(node*));
+			if(freelist_prev) *freelist_prev = n;
+		}
+	} else {
+		*c_next = NULL;
+		*c_prev = NULL;
+	}
 	m->freelist = n;
+	m->tail = curr;
 
-	if(next) next->prev = n;
-
-	next = (node *)((char *)curr + sizeof(node) + curr->length);
-	while(next && (char *)next < (char *)m->end && next->dead){
-		if(next->prev) next->prev->next = next->next;
-		if(next->next) next->next->prev = next->prev;
-
-		curr->length += sizeof(node) + next->length;
-		next = (node *)((char *)next + sizeof(node) + next->length);
+	//self-explanatory
+	while((char *)curr < (char *)m->end) {
+		char *end = (char *)curr + sizeof(node) + curr->length;
+		node **c_prev = (node **)(end - 2 * sizeof(node*));
+		node **c_next = (node **)(end - 1 * sizeof(node*));
+		if(!*c_prev || !*c_next) return;
+		node *prev = *c_prev;
+		char *prev_end = (char *)prev + sizeof(node) + prev->length;
+		node **prev_prev = (node **)(prev_end - 2 * sizeof(node*));
+		node **prev_next = (node **)(prev_end - 1 * sizeof(node*));
+		if(prev_next && prev_prev){
+			*prev_next = *c_next;
+			node *next = *c_next;
+			if(!next) return;
+			char *next_end = (char *)next + sizeof(node) + next->length;
+			node **next_prev = (node **)(next_end - 2 * sizeof(node*));
+			if(*next_prev) *next_prev = prev;
+			prev->length += curr->length + sizeof(node);
+			curr = next;
+		} else {
+			return;
+		}
 	}
 }
 
 void *salloc(master *m, size_t requested){
 	node *curr = m->freelist;
-	while(curr){
-		if(curr->dead && curr->length > requested){
-			curr->dead = false;
-			break;
+	char *end = (char *)curr + sizeof(node) + curr->length;
+	if(*end) {
+		node **c_next = (node **)(end - 1 * sizeof(node*));
+		node **c_prev = (node **)(end - 2 * sizeof(node*));
+		while(curr){
+			if((c_next && c_next) && curr->length > requested) {
+				node *prev = *c_prev;
+				char *prev_end = (char *)prev + sizeof(node) + prev->length;
+				node **prev_next = (node **)(prev_end - 2 * sizeof(node*));
+				node **c_next = (node **)(curr - 2 * sizeof(node*));
+				node *next = *c_next;
+				char *next_end = (char *)next + sizeof(node) + next->length;
+				node **next_prev = (node **)(next_end - 2 * sizeof(node*));
+				*next_prev = *c_prev;
+				*prev_next = *c_next;
+				*c_next = NULL;
+				*c_prev = NULL;
+			}
+
 		}
-		curr = curr->next;
 	}
 	if(curr){
 		if(curr->length >= requested * 2){
 			node *splitN = (node*)((char *)curr + sizeof(node) + requested);
 			splitN->length = curr->length - requested;
 			curr->length = requested;
-			splitN->next = NULL;
-			splitN->dead = true;
 			sfree(m, splitN);
 		}
 		return curr->data;
@@ -117,9 +153,6 @@ void *salloc(master *m, size_t requested){
 		newN->length = requested;
 		newN->dead = false;
 		m->tail = newN;
-		newN->dead = false;
-		newN->next = NULL;
-		newN->prev = NULL;
 		return newN->data;
 	}
 }
