@@ -1,34 +1,23 @@
 #ifndef SALLOC_H
 #define SALLOC_H
 
-#include <stdbool.h>
 #include <stddef.h>
+#include <stdbool.h>
 
-typedef struct node node;
 typedef struct master master;
-
-struct node {
-    bool dead;
-    size_t length;
-    char data[];
-};
+typedef struct header header;
 
 struct master {
-    void *base;
-    size_t memUsed;
-    size_t memFree;
-    node *freelist;
-    node *tail;
+	void *base;
+	void *end;
+	size_t mem_used;
+	size_t mem_free;
+	header *tail;
+	header *freelist;
 };
 
-// API functions
-bool sinit(master *m, size_t requested, bool use_mmap);
-void sfree(master *m, void *ptr);
+bool sinit(master *m, size_t requested);
 void *salloc(master *m, size_t requested);
-void *srealloc(master *m, void *ptr, size_t requested);
-
-void dump_m(master *m);
-void dump_f(master *m);
 void dump_a(master *m);
 
 #endif
