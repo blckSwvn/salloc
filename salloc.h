@@ -18,6 +18,8 @@ struct master {
 
 bool sinit(master *m, size_t requested);
 void *salloc(master *m, size_t requested);
+void sfree(master *m, void *ptr);
 void dump_a(master *m);
+void dump_f(master *m);
 
 #endif

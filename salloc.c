@@ -1,6 +1,8 @@
 #include "sys/mman.h"
 #include <stdio.h>
 #include <stdbool.h>
+#include <string.h>
+#include <stddef.h>
 
 typedef struct header {
 	size_t length;
@@ -22,9 +24,9 @@ typedef struct master {
 } master;
 
 #define SET_USED(h) ((h) | (size_t)1)
+#define SET_FREE(h) ((h) & ~1)
 #define GET_SIZE(h) ((h) & ~(size_t)1)
-#define SET_FREE(h) ((h) & ~(size_t)1)
-#define IS_FREE(h) (((h) & 1) != 0)
+#define IS_USED(h) (((h) & 1) != 0)
 
 #define ALIGN_TO 8
 #define ALIGN(size) (((size) + ((ALIGN_TO)-1)) & ~((ALIGN_TO)-1))
@@ -36,7 +38,7 @@ bool sinit(master *m, size_t size){
 	m->base = start;
 	m->end = (char *)start + size;
 	m->mem_used = 0;
-	m->mem_free = (size_t)((char *)size - (char *)start);
+	m->mem_free = size;
 	m->tail = NULL;
 	m->freelist = NULL;
 
@@ -91,12 +93,92 @@ void *salloc(master *m, size_t requested) {
 	}
 }
 
-void sfree(master *m, header *n){
+void sfree(master *m, void *ptr){
+	if(ptr == m->base){
+		printf("kill arena\n");
+		return;
+	}
 
+	header *c = (header *)((char *)ptr - offsetof(header, data));
+	c->length = SET_FREE(c->length);
+	f_header *cf = (f_header *)((char *)c + sizeof(header) + GET_SIZE(c->length) - sizeof(f_header));
+	cf->next = NULL;
+	cf->prev = NULL;
+	if(m->freelist){
+		cf->next = m->freelist;
+		f_header *mf = (f_header *)((char *)m->freelist + sizeof(header) + GET_SIZE(m->freelist->length) - sizeof(f_header));
+		if(mf->prev) mf->prev = c;
+		m->freelist = c;
+	} else {
+		m->freelist = c;
+	}
+
+	header *p = NULL;
+	if((char *)c > (char *)m->base) {
+		p = (header *)((char*)c - sizeof(header) - GET_SIZE(c->length));
+	}
+
+	f_header *pf = NULL;
+	if((char *)c > (char *)m->base){
+		if(p && !IS_USED(p->length)){ //merges backwards in adjasent memory
+			f_header *pf = (f_header *)((char *)p + sizeof(header) + GET_SIZE(p->length) - sizeof(f_header));
+			if((char *)p > (char *)m->base && !IS_USED(p->length)) {
+				if(cf->prev){
+					printf("cf->prev: %p", cf->prev);
+					f_header *p2f = (f_header *)((char *)p + sizeof(header) + GET_SIZE(p->length) - sizeof(f_header));
+					if(p2f->next) p2f->next = p;
+				}
+			}
+			header *n = (header *)((char *)c + sizeof(header) + GET_SIZE(c->length));
+			if(n && !IS_USED(n->length)){
+				f_header *nf = (f_header *)((char *)n + sizeof(header) + GET_SIZE(n->length) - sizeof(f_header));
+				if(pf->prev && nf->next) nf->prev = c;
+			}
+
+			//merges p to extend to n in length
+			p->length += GET_SIZE(c->length) + sizeof(header);
+			printf("merged prev lengths\n");
+		}
+		header *n = (header *)((char *)c + GET_SIZE(c->length) + sizeof(header)); //merges forward in adjasent memory
+		if(n && !IS_USED(n->length)){
+			f_header *nf = (f_header *)((char *)n + sizeof(header) + GET_SIZE(n->length) - sizeof(f_header));
+			if(cf->prev) nf->prev = cf->prev;
+			if(nf->next){
+				f_header *n2f = (f_header *)((char *)nf->next + sizeof(header) + GET_SIZE(nf->next->length) - sizeof(f_header));
+				if(n2f->prev) n2f->prev = c;
+			}
+			//merges c to extend to n in length
+			printf("merged next length \n");
+			c->length += GET_SIZE(n->length) + sizeof(header);
+		}
+	}
 }
+
+
 
 void srealloc(master *m, header *n){
 
+}
+
+void dump_f(master *m) {
+	header *c = NULL;
+	if(m->freelist) c = m->freelist;
+	size_t nmr = 0;
+	printf("dump_f\n");
+	printf("m->freelist: %p\n", m->freelist);
+	while(c){
+		f_header *cf = (f_header*)((char *)c + sizeof(header) + GET_SIZE(c->length) - sizeof(f_header));
+		void *next = NULL;
+		void *prev = NULL;
+		if(cf->next) next = cf->next;
+		if(cf->prev) prev = cf->prev;
+	//Count | ptr | Free/Used | length 
+	printf("%zu | node: %p | %d | length: %zu | next: %p | prev: %p\n",
+	nmr, c, IS_USED(c->length), GET_SIZE(c->length), next, prev );
+	nmr++;
+	c = cf->next; 
+	}
+	printf("\n");
 }
 
 void dump_a(master *m) {
@@ -104,18 +186,18 @@ void dump_a(master *m) {
 	size_t nmr = 0;
 	void *end = ((char *)c + sizeof(header) + GET_SIZE(c->length));
 	printf("dump_a\n");
-	while(c && (char *)end < (char *)m->end){
+	while(c && c->length && (char *)end < (char *)m->end){
 		f_header *cf = (f_header*)((char *)c + sizeof(header) + GET_SIZE(c->length) - sizeof(f_header));
 		void *next = NULL;
 		void *prev = NULL;
 		if(cf->next) next = cf->next;
 		if(cf->prev) prev = cf->prev;
 	//Count | ptr | Free/Used | length 
-	printf("%zu | node: %p | %s | length: %zu | next: %p | prev: %p\n",
-	nmr, c, IS_FREE(c->length)? "FREE" : "USED", GET_SIZE(c->length), next, prev );
+	printf("%zu | node: %p | %d | length: %zu | next: %p | prev: %p\n",
+	nmr, c, IS_USED(c->length), GET_SIZE(c->length), next, prev );
 	nmr++;
 	end = ((char *)c + sizeof(header) + GET_SIZE(c->length));
-	c += c->length + sizeof(header);
+	c = (header *)((char *)c + GET_SIZE(c->length) + sizeof(header));
 	}
 	printf("\n");
 }
