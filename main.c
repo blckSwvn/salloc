@@ -21,8 +21,8 @@ void *e = salloc(&m, 10);
 
 dump_a(&m);
 printf("sfreed stuff\n");
-sfree(&m, c);
 sfree(&m, b);
+sfree(&m, c);
 dump_a(&m);
 dump_f(&m);
 }

@@ -107,7 +107,7 @@ void sfree(master *m, void *ptr){
 	if(m->freelist){
 		cf->next = m->freelist;
 		f_header *mf = (f_header *)((char *)m->freelist + sizeof(header) + GET_SIZE(m->freelist->length) - sizeof(f_header));
-		if(mf->prev) mf->prev = c;
+		mf->prev = c;
 		m->freelist = c;
 	} else {
 		m->freelist = c;
@@ -137,19 +137,22 @@ void sfree(master *m, void *ptr){
 
 			//merges p to extend to n in length
 			p->length += GET_SIZE(c->length) + sizeof(header);
+			c = p;
 			printf("merged prev lengths\n");
 		}
 		header *n = (header *)((char *)c + GET_SIZE(c->length) + sizeof(header)); //merges forward in adjasent memory
-		if(n && !IS_USED(n->length)){
-			f_header *nf = (f_header *)((char *)n + sizeof(header) + GET_SIZE(n->length) - sizeof(f_header));
-			if(cf->prev) nf->prev = cf->prev;
-			if(nf->next){
-				f_header *n2f = (f_header *)((char *)nf->next + sizeof(header) + GET_SIZE(nf->next->length) - sizeof(f_header));
-				if(n2f->prev) n2f->prev = c;
+		if(((char *)n + sizeof(header) + n->length) < (char *)m->end){
+			if(n && !IS_USED(n->length)){
+				f_header *nf = (f_header *)((char *)n + sizeof(header) + GET_SIZE(n->length) - sizeof(f_header));
+				if(cf->prev) nf->prev = cf->prev;
+				if(nf->next){
+					f_header *n2f = (f_header *)((char *)nf->next + sizeof(header) + GET_SIZE(nf->next->length) - sizeof(f_header));
+					if(n2f->prev) n2f->prev = c;
+				}
+				//merges c to extend to n in length
+				printf("merged next length \n");
+				c->length += GET_SIZE(n->length) + sizeof(header);
 			}
-			//merges c to extend to n in length
-			printf("merged next length \n");
-			c->length += GET_SIZE(n->length) + sizeof(header);
 		}
 	}
 }
@@ -176,6 +179,7 @@ void dump_f(master *m) {
 	printf("%zu | node: %p | %d | length: %zu | next: %p | prev: %p\n",
 	nmr, c, IS_USED(c->length), GET_SIZE(c->length), next, prev );
 	nmr++;
+	if(nmr > 5) break;
 	c = cf->next; 
 	}
 	printf("\n");
