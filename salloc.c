@@ -93,69 +93,89 @@ void *salloc(master *m, size_t requested) {
 	}
 }
 
-void sfree(master *m, void *ptr){
-	if(ptr == m->base){
-		printf("kill arena\n");
-		return;
-	}
 
-	header *c = (header *)((char *)ptr - offsetof(header, data));
-	c->length = SET_FREE(c->length);
-	f_header *cf = (f_header *)((char *)c + sizeof(header) + GET_SIZE(c->length) - sizeof(f_header));
-	cf->next = NULL;
-	cf->prev = NULL;
-	if(m->freelist){
-		cf->next = m->freelist;
-		f_header *mf = (f_header *)((char *)m->freelist + sizeof(header) + GET_SIZE(m->freelist->length) - sizeof(f_header));
-		mf->prev = c;
-		m->freelist = c;
-	} else {
-		m->freelist = c;
-	}
+void sfree(master *m, void *ptr) {
+    if (!ptr || ptr == m->base) return;
 
-	header *p = NULL;
-	if((char *)c > (char *)m->base) {
-		p = (header *)((char*)c - sizeof(header) - GET_SIZE(c->length));
-	}
+    // --- Step 1: mark block as free ---
+    header *c = (header *)((char *)ptr - offsetof(header, data));
+    size_t csize = GET_SIZE(c->length);
+    c->length = SET_FREE(csize);
 
-	f_header *pf = NULL;
-	if((char *)c > (char *)m->base){
-		if(p && !IS_USED(p->length)){ //merges backwards in adjasent memory
-			f_header *pf = (f_header *)((char *)p + sizeof(header) + GET_SIZE(p->length) - sizeof(f_header));
-			if((char *)p > (char *)m->base && !IS_USED(p->length)) {
-				if(cf->prev){
-					printf("cf->prev: %p", cf->prev);
-					f_header *p2f = (f_header *)((char *)p + sizeof(header) + GET_SIZE(p->length) - sizeof(f_header));
-					if(p2f->next) p2f->next = p;
-				}
-			}
-			header *n = (header *)((char *)c + sizeof(header) + GET_SIZE(c->length));
-			if(n && !IS_USED(n->length)){
-				f_header *nf = (f_header *)((char *)n + sizeof(header) + GET_SIZE(n->length) - sizeof(f_header));
-				if(pf->prev && nf->next) nf->prev = c;
-			}
+    f_header *cf = (f_header *)((char *)c + sizeof(header) + csize - sizeof(f_header));
+    cf->next = NULL;
+    cf->prev = NULL;
 
-			//merges p to extend to n in length
-			p->length += GET_SIZE(c->length) + sizeof(header);
-			c = p;
-			printf("merged prev lengths\n");
-		}
-		header *n = (header *)((char *)c + GET_SIZE(c->length) + sizeof(header)); //merges forward in adjasent memory
-		if(((char *)n + sizeof(header) + n->length) < (char *)m->end){
-			if(n && !IS_USED(n->length)){
-				f_header *nf = (f_header *)((char *)n + sizeof(header) + GET_SIZE(n->length) - sizeof(f_header));
-				if(cf->prev) nf->prev = cf->prev;
-				if(nf->next){
-					f_header *n2f = (f_header *)((char *)nf->next + sizeof(header) + GET_SIZE(nf->next->length) - sizeof(f_header));
-					if(n2f->prev) n2f->prev = c;
-				}
-				//merges c to extend to n in length
-				printf("merged next length \n");
-				c->length += GET_SIZE(n->length) + sizeof(header);
-			}
-		}
-	}
+    // --- Step 2: merge with previous free block ---
+    f_header *pf = NULL;
+    header *p = NULL;
+    header *p2 = NULL;
+
+
+    // check if there is a previous block in memory
+    if ((char *)c > (char *)m->base + sizeof(header)) {
+	    header *n = NULL;
+	    f_header *nf = NULL;
+        // previous block's footer is just before current header
+        pf = (f_header *)((char *)c - sizeof(f_header));
+        if (pf->prev) {
+            p2 = pf->prev;                   // previous free block header
+            f_header *p2f = (f_header *)((char *)p2 + sizeof(header) + GET_SIZE(p2->length) - sizeof(f_header));
+	    p = p2f->next;
+	    if(cf->next) p2f->next = cf->next;
+	    else p2f->next = NULL;
+	    n = (header *)((char *)c + sizeof(header) + csize);
+	    if(n && !IS_USED(n->length)){
+		    nf = (f_header *)((char *)n + sizeof(header) + GET_SIZE(n->length) - sizeof(f_header));
+		    if(pf->prev) nf->prev = pf->prev;
+		    else nf->prev = NULL;
+	    }
+            if (!IS_USED(p->length)) {
+                // merge previous block into current
+                p->length += sizeof(header) + csize;
+                c = p;                       // c now points to merged block
+                cf = (f_header *)((char *)c + sizeof(header) + GET_SIZE(c->length) - sizeof(f_header));
+            }
+        }
+    }
+
+    // --- Step 3: merge with next free block ---
+    header *n = (header *)((char *)c + sizeof(header) + GET_SIZE(c->length));
+    if ((char *)n < (char *)m->end && !IS_USED(n->length)) {
+        size_t nsize = GET_SIZE(n->length);
+        f_header *nf = (f_header *)((char *)n + sizeof(header) + nsize - sizeof(f_header));
+
+        // unlink next block from freelist
+        if (nf->prev) {
+            f_header *prev_nf = (f_header *)((char *)nf->prev + sizeof(header) + GET_SIZE(nf->prev->length) - sizeof(f_header));
+            prev_nf->next = nf->next;
+        } else {
+            m->freelist = nf->next;
+        }
+        if (nf->next) {
+            f_header *next_nf = (f_header *)((char *)nf->next + sizeof(header) + GET_SIZE(nf->next->length) - sizeof(f_header));
+            next_nf->prev = nf->prev;
+        }
+
+        // merge current block with next
+        c->length += sizeof(header) + nsize;
+        cf = (f_header *)((char *)c + sizeof(header) + GET_SIZE(c->length) - sizeof(f_header));
+    }
+
+    // --- Step 4: insert merged block at head of freelist ---
+    cf->next = m->freelist;
+    cf->prev = NULL;
+    if (m->freelist) {
+        f_header *oldf = (f_header *)((char *)m->freelist + sizeof(header) + GET_SIZE(m->freelist->length) - sizeof(f_header));
+        oldf->prev = c;
+    }
+    m->freelist = c;
+
+    // --- Step 5: update memory accounting ---
+    m->mem_free += GET_SIZE(c->length);
+    m->mem_used -= GET_SIZE(c->length);
 }
+
 
 
 

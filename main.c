@@ -17,12 +17,14 @@ void *b = salloc(&m, 10);
 void *c = salloc(&m, 10);
 void *d = salloc(&m, 10);
 void *e = salloc(&m, 10);
+void *f = salloc(&m, 10);
 
 
 dump_a(&m);
 printf("sfreed stuff\n");
+sfree(&m, e);
 sfree(&m, b);
-sfree(&m, c);
-dump_a(&m);
+sfree(&m, d);
+dump_f(&m);
 dump_f(&m);
 }
