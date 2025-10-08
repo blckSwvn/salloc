@@ -59,11 +59,12 @@ void *salloc(master *m, size_t requested) {
 		header *p;
 		f_header *pf;
 		if(requested <= GET_SIZE(c->length) + sizeof(header)) {
-			// printf("if requested <= GET_SIZE\n");
+			printf("if requested <= GET_SIZE");
 			if(cf && cf->next) {
-				// printf("if cf->next\n");
+				printf("if cf->next");
 				n = cf->next;
 				nf = (f_header*)((char *)n + sizeof(header) + GET_SIZE(n->length) - sizeof(f_header));
+				nf->prev = cf->prev;
 			}
 			if(cf->prev) {
 				if(nf->prev) nf->prev = cf->prev;
@@ -71,8 +72,11 @@ void *salloc(master *m, size_t requested) {
 				pf = (f_header*)((char*)p + sizeof(header) + GET_SIZE(p->length) - sizeof(f_header));
 			} 
 			if(pf->next) {
-				if(n) pf->next = n;
+				pf->next = cf->next;
 			}
+			if(n) m->freelist = n;
+			cf->next = NULL;
+			cf->prev = NULL;
 			c->length = SET_USED(c->length);
 			return c->data;
 		}

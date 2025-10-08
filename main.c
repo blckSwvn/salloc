@@ -18,7 +18,7 @@ printf("m->mem_free: %zu\n", m.mem_free);
 
 dump_a(&m);
 // printf("sfreed stuff\n");
-sfree(&m, a);
+// sfree(&m, a);
 sfree(&m, b);
 dump_f(&m);
 printf("m->mem_used: %zu\n", m.mem_used);
