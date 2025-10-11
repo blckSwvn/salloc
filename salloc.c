@@ -62,11 +62,25 @@ void *salloc(master *m, size_t requested) {
 				f_header *pf = (f_header *)((char *)cf->prev + GET_SIZE(cf->prev->length) - sizeof(f_header));
 				pf->next = cf->prev ? pf->next = cf->next: NULL;
 			} 
-			m->freelist = cf->next ? cf->next: NULL;
-			cf->next = NULL;
-			cf->prev = NULL;
-			c->length = SET_USED(c->length);
-			return c->data;
+			if(GET_SIZE(c->length) - requested - sizeof(header) >= sizeof(f_header) + sizeof(header)) {
+				c->length -= requested + sizeof(header);
+				header *split = (header *)((char *)c + sizeof(header) + GET_SIZE(c->length));
+				cf = (f_header *)((char *)c + sizeof(header) + GET_SIZE(c->length) - sizeof(f_header));
+				split->length = SET_USED(requested);
+				cf->next = m->freelist && m->freelist != c ? m->freelist: NULL;
+				cf->prev = NULL;
+				m->freelist = c;
+				f_header *sf = (f_header *)((char *)split + sizeof(header) + GET_SIZE(split->length) - sizeof(f_header));
+				sf->next = NULL;
+				sf->prev = NULL;
+				return split->data;
+			} else {
+				m->freelist = cf->next ? cf->next: NULL;
+				cf->next = NULL;
+				cf->prev = NULL;
+				c->length = SET_USED(c->length);
+				return c->data;
+			}
 		}
 		if(cf->next) c = cf->next;
 	}
