@@ -48,7 +48,7 @@ bool sinit(master *m, size_t size){
 
 void *salloc(master *m, size_t requested) {
 	requested = ALIGN(requested);
-	if(requested <= sizeof(f_header))requested = sizeof(f_header);
+	if(requested <= sizeof(f_header)) requested = sizeof(f_header);
 
 	header *c = m->freelist;
 	while(c){
@@ -62,7 +62,7 @@ void *salloc(master *m, size_t requested) {
 				f_header *pf = (f_header *)((char *)cf->prev + GET_SIZE(cf->prev->length) - sizeof(f_header));
 				pf->next = cf->prev ? pf->next = cf->next: NULL;
 			} 
-			if(GET_SIZE(c->length) - requested - sizeof(header) >= sizeof(f_header) + sizeof(header)) {
+			if(GET_SIZE(c->length) > requested + sizeof(header) && GET_SIZE(c->length) - requested - sizeof(header) >= sizeof(f_header) + sizeof(header)) {
 				c->length -= requested + sizeof(header);
 				header *split = (header *)((char *)c + sizeof(header) + GET_SIZE(c->length));
 				cf = (f_header *)((char *)c + sizeof(header) + GET_SIZE(c->length) - sizeof(f_header));
@@ -74,15 +74,15 @@ void *salloc(master *m, size_t requested) {
 				sf->next = NULL;
 				sf->prev = NULL;
 				return split->data;
-			} else {
-				m->freelist = cf->next ? cf->next: NULL;
-				cf->next = NULL;
-				cf->prev = NULL;
-				c->length = SET_USED(c->length);
-				return c->data;
 			}
+			m->freelist = cf->next ? cf->next: NULL;
+			cf->next = NULL;
+			cf->prev = NULL;
+			c->length = SET_USED(c->length);
+			return c->data;
 		}
 		if(cf->next) c = cf->next;
+		else break;
 	}
 	if(requested + sizeof(header) > m->mem_free) return NULL;
 
@@ -205,7 +205,7 @@ void sfree(master *m, void *ptr) {
     m->freelist = c;
 }
 
-void *srealloc(master *m, void **ptr, size_t requested){
+void srealloc(master *m, void **ptr, size_t requested){
 	header *c = (header *)((char *)*ptr - offsetof(header, data));
 	header *n = (header *)((char *)c + sizeof(header) + GET_SIZE(c->length));
 	f_header *nf = n ?(f_header *)((char *)n + sizeof(header) + GET_SIZE(n->length) - sizeof(f_header)): NULL;
@@ -234,13 +234,13 @@ void *srealloc(master *m, void **ptr, size_t requested){
 		SET_USED(n->length);
 		n->length += requested + sizeof(header);
 		*ptr = (void *)n->data;
-		return n->data;
+		return; 
 	}
 
 	header *new = salloc(m, old_length);
 	memcpy(new, c->data, old_length);
 	*ptr = (void *)new->data;
-	return new;
+	return;
 }
 
 void dump_f(master *m) {
