@@ -5,27 +5,25 @@ int main(){
 master m;
 
 sinit(&m, 1024);
-// void *a = salloc(&m, 10);
-void *d = salloc(&m, 10);
+int size = 3;
 void *b = salloc(&m, 100);
+void *ptr = salloc(&m, size * sizeof(int));
+void *d = salloc(&m, sizeof(long));
+void *c = salloc(&m, sizeof(int));
+void *idk = salloc(&m, 10);
 printf("m->mem_used: %zu\n", m.mem_used);
 printf("m->mem_free: %zu\n", m.mem_free);
 
-// printf("allocated stuff\n");
-// printf("m->mem_used: %zu\n", m.mem_used);
-// printf("m->mem_free: %zu\n", m.mem_free);
-
-// printf("sfreed stuff\n");
-// sfree(&m, a);
-// sfree(&m, b);
+dump_a(&m);
+sfree(&m, d);
+dump_a(&m);
 sfree(&m, b);
-dump_f(&m);
+dump_a (&m);
+// sfree(&m, ptr);
+// dump_a (&m);
+sfree(&m, idk);
+sfree(&m, c);
 dump_a(&m);
-printf("m->mem_used: %zu\n", m.mem_used);
-printf("m->mem_free: %zu\n", m.mem_free);
-srealloc(&m, d, 60);
-dump_f(&m);
+sfree(&m, ptr);
 dump_a(&m);
-printf("m->mem_used: %zu\n", m.mem_used);
-printf("m->mem_free: %zu\n", m.mem_free);
 }

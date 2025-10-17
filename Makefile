@@ -1,6 +1,6 @@
 # Compiler
 CC = gcc
-CFLAGS = -Wall -Wextra -O2
+CFLAGS = -Wall -Wextra -O2 -fsanitize=undefined -fsanitize=address -g
 
 # Target executable
 TARGET = main

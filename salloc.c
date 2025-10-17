@@ -29,7 +29,7 @@ typedef struct master {
 #define IS_USED(h) (((h) & 1) != 0)
 
 
-#define ALIGN_TO 8
+#define ALIGN_TO 16
 #define ALIGN(size) (((size) + ((ALIGN_TO)-1)) & ~((ALIGN_TO)-1))
 
 bool sinit(master *m, size_t size){
@@ -110,9 +110,9 @@ void sfree(master *m, void *ptr) {
     if (!ptr || ptr == m->base) return;
 
     header *c = (header *)((char *)ptr - offsetof(header, data));
+    c->length = SET_FREE(c->length);
     size_t csize = GET_SIZE(c->length);
     size_t total = sizeof(header) + GET_SIZE(c->length);
-    c->length = SET_FREE(csize);
     f_header *cf = (f_header *)((char *)c + sizeof(header) + csize - sizeof(f_header));
 
     m->mem_free += total;
@@ -127,7 +127,6 @@ void sfree(master *m, void *ptr) {
     if(m->freelist && m->freelist != c){
 	    f_header *mf = (f_header *)((char *)m->freelist + sizeof(header) + GET_SIZE(m->freelist->length) - sizeof(f_header));
 	    if(mf->next == c){
-		    printf("mf->next == c\n");
 		    //insert into freelist
 		    cf->next = m->freelist;
 		    cf->prev = NULL;
@@ -138,21 +137,26 @@ void sfree(master *m, void *ptr) {
 		    return;
 		    }
 	    }
+    header *old = m->freelist;
+    f_header *oldf = (f_header *)((char *)old + sizeof(header) + GET_SIZE(old->length) - sizeof(f_header));
 
-    cf->next = NULL;
+    cf->next = old;
     cf->prev = NULL;
+    oldf->prev = c;
+    m->freelist = c;
+
 
     f_header *pf = NULL;
     header *p = NULL;
     header *p2 = NULL;
+    header *n = NULL;
+    f_header *nf = NULL;
 
     //check if there is a previous block in memory
     if ((char *)c > (char *)m->base + sizeof(header)) {
-	    header *n = NULL;
-	    f_header *nf = NULL;
         //previous block's footer is just before current header
-        pf = (f_header *)((char *)c - sizeof(f_header));
-        if (pf->prev) {
+        pf = (f_header *)((char *)c - sizeof(header) + sizeof(f_header));
+        if (pf && pf->prev) {
             p2 = pf->prev;                   // previous free block header
             f_header *p2f = (f_header *)((char *)p2 + sizeof(header) + GET_SIZE(p2->length) - sizeof(f_header));
 	    p = p2f->next;
@@ -167,13 +171,13 @@ void sfree(master *m, void *ptr) {
             if (!IS_USED(p->length)) {
                 // merge previous block into current
                 p->length += sizeof(header) + csize;
-                c = p;
+                // c = p;
                 cf = (f_header *)((char *)c + sizeof(header) + GET_SIZE(c->length) - sizeof(f_header));
             }
         }
     }
 
-    header *n = (header *)((char *)c + sizeof(header) + GET_SIZE(c->length));
+    n = (header *)((char *)c + sizeof(header) + GET_SIZE(c->length));
     if ((char *)n < (char *)m->end && !IS_USED(n->length)) {
         size_t nsize = GET_SIZE(n->length);
         f_header *nf = (f_header *)((char *)n + sizeof(header) + nsize - sizeof(f_header));
@@ -194,15 +198,6 @@ void sfree(master *m, void *ptr) {
         c->length += sizeof(header) + nsize;
         cf = (f_header *)((char *)c + sizeof(header) + GET_SIZE(c->length) - sizeof(f_header));
     }
-
-    //insert into freelist
-    cf->next = m->freelist;
-    cf->prev = NULL;
-    if (m->freelist) {
-        f_header *oldf = (f_header *)((char *)m->freelist + sizeof(header) + GET_SIZE(m->freelist->length) - sizeof(f_header));
-        oldf->prev = c;
-    }
-    m->freelist = c;
 }
 
 void srealloc(master *m, void **ptr, size_t requested){
@@ -234,6 +229,9 @@ void srealloc(master *m, void **ptr, size_t requested){
 		SET_USED(n->length);
 		n->length += requested + sizeof(header);
 		*ptr = (void *)n->data;
+		f_header *oldf = (f_header *)((char *)m->freelist + sizeof(header) + GET_SIZE(m->freelist->length) - sizeof(f_header));
+		oldf->prev = c;
+		m->freelist = c;
 		return; 
 	}
 
@@ -269,6 +267,7 @@ void dump_a(master *m) {
 	size_t nmr = 0;
 	void *end = ((char *)c + sizeof(header) + GET_SIZE(c->length));
 	printf("dump_a\n");
+	printf("m->freelist: %p\n", m->freelist);
 	while(c && c->length && (char *)end < (char *)m->end){
 		f_header *cf = (f_header*)((char *)c + sizeof(header) + GET_SIZE(c->length) - sizeof(f_header));
 		void *next = NULL;
@@ -284,3 +283,4 @@ void dump_a(master *m) {
 	}
 	printf("\n");
 }
+
