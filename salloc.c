@@ -46,6 +46,7 @@ static const size_t size_freelist[BINS] = {
 
 void add_to_free(master *m, header *curr);
 void *split_block(master *m, void **ptr, size_t requested);
+void *remove_from_free(master *m, size_t requested);
 
 void add_to_free(master *m, header *curr){
 	curr->length = SET_FREE(curr->length);
@@ -73,7 +74,6 @@ void add_to_free(master *m, header *curr){
 
 				return;
 			}
-
 		}
 		i++;
 	}
@@ -230,10 +230,10 @@ void *salloc(master *m, size_t requested) {
 void dump_f(master *m) {
 	header *c = NULL;
 	uint8_t i = 0;
-	while(i){
+	printf("dump_f\n");
+	while(i < BINS){
 		if(m->freelist[i]) c = m->freelist[i];
 		size_t nmr = 0;
-		printf("dump_f\n");
 		printf("m->freelist: %p freelist_size: %zu sizeof(f_header): %zu sizeof(header): %zu \n", m->freelist, size_freelist[i], sizeof(f_header), sizeof(header));
 		while(c){
 			f_header *cf = (f_header*)((char *)c + sizeof(header) + GET_SIZE(c->length) - sizeof(f_header));
