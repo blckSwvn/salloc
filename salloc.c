@@ -51,41 +51,50 @@ static void *remove_from_free(master *m, size_t requested);
 static void merge_free(master *m, header *curr){
 	uint8_t i = 0;
 	if(!m->freelist[i] || m->freelist[i] == curr) return;
-	f_header *prev_f; 
-	header *prev = (header *)((char *)curr - sizeof(header));
+	f_header *prev_f = (f_header *)((char *)curr - sizeof(header)); 
+	header *prev;
 	header *prev_prev;
 	f_header *prev_prev_f;
 	header *next;
 	f_header *check_f;
 	f_header *check2_f;
-	if(prev){
-		prev_f = (f_header *)((char *)curr - sizeof(f_header));
-		if(prev_f){
-			//for validation of prev footer
-			check_f = prev_f;
+	if(prev_f){
+		//for validation of prev footer later
+		check_f = prev_f;
 
-			prev_prev = prev_f->prev;
-			if(prev_prev) prev_prev_f = (f_header *)((char *)prev_prev + GET_SIZE(prev_prev->length) - sizeof(f_header) + sizeof(header));
-			else prev_prev_f = NULL;
-			if(prev_prev_f && prev_prev_f->next) {
-				prev = prev_prev_f->next;
-				prev_f = (f_header *)((char *)prev + GET_SIZE(prev->length) - sizeof(f_header) + sizeof(header));
+		prev_prev = prev_f->prev;
+		if(prev_prev) prev_prev_f = (f_header *)((char *)prev_prev + GET_SIZE(prev_prev->length) - sizeof(f_header) + sizeof(header));
+		else {
+			printf("!prev prev\n");
+			prev_prev_f = NULL;
+		}
+		if(prev_prev_f && prev_prev_f->next) {
+			prev = prev_prev_f->next;
+			prev_f = (f_header *)((char *)prev + GET_SIZE(prev->length) - sizeof(f_header) + sizeof(header));
 
-				//validates prev footer
-				check2_f = (f_header *)((char *)prev + GET_SIZE(prev->length) - sizeof(f_header) + sizeof(header));
-				if(check_f != check2_f){
-					prev = NULL;
-				}
-			} 
-			else prev = NULL;
+			//validates prev footer
+			check2_f = (f_header *)((char *)prev + GET_SIZE(prev->length) - sizeof(f_header) + sizeof(header));
+			if(check_f != check2_f){
+				prev = NULL;
+			} else {
+				printf("check_f != check2_f\n");
+			}
+		} else {
+			printf("!prev_prev_f->next\n");
+			prev = NULL;
 		} 
 	} else {
+		printf("prev_f\n");
 		prev = NULL;
 	}
 	if(prev){
+		printf("prev\n");
 		f_header *curr_f = (f_header *)((char *)curr + sizeof(header) + GET_SIZE(curr->length) - sizeof(f_header));
 		if(curr_f->next) prev_prev_f->next = curr_f->prev;
-		else prev_prev_f->next = NULL;
+		else {
+			prev_prev_f->next = NULL;
+			printf("!curr_f->next");
+		}
 	}
 
 	next = (header *)((char *)curr + sizeof(header) + GET_SIZE(curr->length));
@@ -124,17 +133,6 @@ static void add_to_free(master *m, header *curr){
 				m->freelist[i] = curr;
 				return;
 			}
-			// if(m->freelist[i] && m->freelist[i] != curr){
-			// 	f_header *head = (f_header *)((char *)m->freelist + sizeof(header) + GET_SIZE(m->freelist[i]->length) - sizeof(f_header));
-			// 	head->prev = curr;
-			// 	if(head->next == curr)head->next = NULL;
-			// 	curr_f->next = m->freelist[i];
-			// 	curr_f->prev = NULL;
-			//
-			// 	m->freelist[i] = curr;
-			//
-			// 	return;
-			// }
 		}
 		i++;
 	}
@@ -143,7 +141,7 @@ static void add_to_free(master *m, header *curr){
 static void *remove_from_free(master *m, size_t requested){
 	uint8_t i = 0;
 	while(i < BINS){
-		if(size_freelist[i] * 2 >= requested && requested >= size_freelist[i]){
+		if(size_freelist[i] * 2 >= requested){
 			header *free = m->freelist[i];	
 			while(free){
 				size_t free_length = GET_SIZE(m->freelist[i]->length);
@@ -163,7 +161,7 @@ static void *remove_from_free(master *m, size_t requested){
 						if(free_f->prev) next_f->prev = free_f->prev;
 						else next_f->prev = NULL;
 					}
-					free = split_block(m, (void *)free->data, requested);
+					// free = split_block(m, (void *)free->data, requested);
 					SET_USED(free->length);
 					return free;
 				};
@@ -186,11 +184,11 @@ void sfree(master *m, void *ptr) {
     m->mem_used -= total;
 
     add_to_free(m, curr);
-    // merge_free(m, curr);
+    merge_free(m, curr);
 }
 
 static void *split_block(master *m, void **ptr, size_t requested){
-	header *curr = (header *)((char *)*ptr - offsetof(header, data));
+	header *curr = (header *)((char *)ptr - offsetof(header, data));
 	size_t curr_length = GET_SIZE(curr->length);
 	if(requested + sizeof(header) < curr_length){
 		header *split = (header *)((char *)curr + sizeof(header) + GET_SIZE(curr_length) - requested - sizeof(header));
@@ -224,6 +222,9 @@ void *salloc(master *m, size_t requested) {
 	requested = ALIGN(requested);
 	if(requested <= sizeof(f_header)) requested = sizeof(f_header);
 	header *c = NULL;
+	c = remove_from_free(m, requested);
+	if(c) return c->data;
+	else printf("didnt work\n");
 
 	if(m->tail){
 		c = (header*)((char*)m->tail + GET_SIZE(m->tail->length) + sizeof(header));
