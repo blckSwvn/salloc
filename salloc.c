@@ -5,7 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
-#include <stdint.h>
 
 typedef struct header {
 	size_t length;
@@ -48,66 +47,55 @@ static void add_to_free(master *m, header *curr);
 static void *split_block(master *m, void **ptr, size_t requested);
 static void *remove_from_free(master *m, size_t requested);
 
+static bool validate_prev(master *m, f_header *prev_f){
+}
+
+static void *merge_backwards(master *m, header *curr, f_header *prev_f){
+	if(!prev_f) return NULL;
+
+	//bounds check
+	if((char *)m->base > (char *)prev_f->prev || (char *)prev_f->next > (char *)m->end){
+		return NULL; 
+	}
+	header *prev_prev = prev_f->prev;
+	f_header *prev_prev_f = ((f_header *)(char *)prev_prev + GET_SIZE(prev_prev->length) - sizeof(f_header) + sizeof(header));
+
+	if((char *)m->base > (char *)prev_prev_f->prev || (char *)prev_prev_f->next > (char *)m->end ) return NULL;
+
+	header *prev = prev_prev_f->next;
+
+	f_header *new_f = (f_header *)((char *)prev + GET_SIZE(prev->length) - sizeof(f_header) + sizeof(header));
+	if(new_f->prev == prev_f->prev && new_f->next == prev_f->next){
+		f_header *curr_f = (f_header *)((char *)curr + GET_SIZE(curr->length) - sizeof(f_header) + sizeof(header));
+		prev_prev_f->next = curr_f->next;
+
+		header *next =(header *)((char *)curr + sizeof(header) + GET_SIZE(curr->length));
+		f_header *next_f = (f_header *)((char *)next + GET_SIZE(next->length) - sizeof(f_header) + sizeof(header));
+		next_f->prev = prev_prev;
+		prev->length += curr->length + sizeof(header);
+		return prev;
+	}
+	return NULL;
+}
+
 static void merge_free(master *m, header *curr){
-	uint8_t i = 0;
-	if(!m->freelist[i] || m->freelist[i] == curr) return;
 	f_header *prev_f = (f_header *)((char *)curr - sizeof(header)); 
-	header *prev;
-	header *prev_prev;
-	f_header *prev_prev_f;
-	header *next;
-	f_header *check_f;
-	f_header *check2_f;
-	if(prev_f){
-		//for validation of prev footer later
-		check_f = prev_f;
+	header *next = (header *)((char *)curr + sizeof(header) + GET_SIZE(curr->length));
+	header *next_next = NULL;
 
-		prev_prev = prev_f->prev;
-		if(prev_prev) prev_prev_f = (f_header *)((char *)prev_prev + GET_SIZE(prev_prev->length) - sizeof(f_header) + sizeof(header));
-		else {
-			printf("!prev prev\n");
-			prev_prev_f = NULL;
-		}
-		if(prev_prev_f && prev_prev_f->next) {
-			prev = prev_prev_f->next;
-			prev_f = (f_header *)((char *)prev + GET_SIZE(prev->length) - sizeof(f_header) + sizeof(header));
+	header *prev = merge_backwards(m, curr, prev_f);
 
-			//validates prev footer
-			check2_f = (f_header *)((char *)prev + GET_SIZE(prev->length) - sizeof(f_header) + sizeof(header));
-			if(check_f != check2_f){
-				prev = NULL;
-			} else {
-				printf("check_f != check2_f\n");
-			}
-		} else {
-			printf("!prev_prev_f->next\n");
-			prev = NULL;
-		} 
-	} else {
-		printf("prev_f\n");
-		prev = NULL;
-	}
-	if(prev){
-		printf("prev\n");
-		f_header *curr_f = (f_header *)((char *)curr + sizeof(header) + GET_SIZE(curr->length) - sizeof(f_header));
-		if(curr_f->next) prev_prev_f->next = curr_f->prev;
-		else {
-			prev_prev_f->next = NULL;
-			printf("!curr_f->next");
-		}
-	}
-
-	next = (header *)((char *)curr + sizeof(header) + GET_SIZE(curr->length));
 	if(next && !IS_USED(next->length)) {
 		f_header *next_f = (f_header *)((char *)next + GET_SIZE(next->length) - sizeof(header) + sizeof(f_header));
-		if(next_f->next) {
+		if(next_f->next){
 			header *next_next = next_f->next;
 			f_header *next_next_f = (f_header *)((char *)next_next + GET_SIZE(next_next->length) - sizeof(f_header) + sizeof(header));
-			next_next_f->prev = curr;
+			if(prev) next_next_f->prev = prev;
+			else next_next_f->prev = NULL;
 		}
-	} else {
-		next = NULL;
-	}
+		if(prev) prev_f->next = next_next;
+		else prev_f->next = NULL;
+	} 
 }
 
 static void add_to_free(master *m, header *curr){
@@ -131,6 +119,7 @@ static void add_to_free(master *m, header *curr){
 				curr_f->next = m->freelist[i];
 				curr_f->prev = NULL;
 				m->freelist[i] = curr;
+				merge_free(m, curr);
 				return;
 			}
 		}
@@ -224,7 +213,6 @@ void *salloc(master *m, size_t requested) {
 	header *c = NULL;
 	c = remove_from_free(m, requested);
 	if(c) return c->data;
-	else printf("didnt work\n");
 
 	if(m->tail){
 		c = (header*)((char*)m->tail + GET_SIZE(m->tail->length) + sizeof(header));
