@@ -1,4 +1,4 @@
-#include "sys/mman.h"
+#include <sys/mman.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -12,7 +12,7 @@ typedef struct header {
 } header;
 
 typedef struct f_header {
-	header *header;
+	header *head;
 	header *next;
 	header *prev;
 } f_header;
@@ -64,14 +64,22 @@ static void *remove_from_free(master *m, size_t requested);
 
 static void *merge_backwards(master *m, header *curr, f_header *prev_f){
 	if(PREV_INUSE(curr->length)) return NULL;
+	if(!prev_f) return NULL;
+	if(!prev_f->head) return NULL;
 	if(!prev_f->prev) return NULL;
 
 	header *prev_prev = prev_f->prev;
-	f_header *prev_prev_f = (f_header *)((char *)prev_prev + GET_SIZE(prev_prev->length) - sizeof(f_header) + sizeof(header));
-	header *prev = prev_prev_f->next;
+	header *prev = prev_f->head;
+	f_header *prev_prev_f = NULL;
+	prev_prev_f = (f_header *)((char *)prev_prev + GET_SIZE(prev_prev->length) - sizeof(f_header) + sizeof(header));
 
-	f_header *curr_f = (f_header*)((char *)curr + GET_SIZE(curr->length) - sizeof(f_header) + sizeof(header));
+	f_header *curr_f = (f_header*)((char *)curr + sizeof(header) + GET_SIZE(curr->length) - sizeof(f_header));
+	curr_f->head = prev;
 	curr_f->prev = prev_prev;
+	printf("curr:%p\n", curr);
+	printf("curr->length:%zu\n", curr->length);
+	printf("prev:%p\n", prev);
+	printf("prev->length:%zu\n", prev->length);
 	prev->length += sizeof(header) + GET_SIZE(curr->length);
 	printf("prev->length: %zu\n", prev->length);
 
@@ -79,7 +87,7 @@ static void *merge_backwards(master *m, header *curr, f_header *prev_f){
 		header *next = curr_f->next;
 		prev_prev_f->next = next;
 		f_header *next_f = (f_header *)((char *)next + sizeof(header) + GET_SIZE(next->length) - sizeof(f_header));
-		if(prev_prev) next_f->prev = prev_prev;
+		next_f->prev = prev_prev;
 	} else {
 		printf("didnt merge didnt laugh\n");
 		prev_prev_f->next = NULL;
@@ -94,8 +102,8 @@ static void merge_free(master *m, header *curr){
 	header *next = (header *)((char *)curr + sizeof(header) + GET_SIZE(curr->length));
 	header *next_next = NULL;
 
-	if(!PREV_INUSE(curr->length)) {
-		prev_f = (f_header *)((char *)curr - sizeof(header));
+	if(!PREV_INUSE(curr->length) && m->base != curr) {
+		prev_f = (f_header *)((char *)curr - (sizeof(f_header) + sizeof(header)));
 	} else printf("PREV_INUSE\n");
 
 	if(prev_f) prev = merge_backwards(m, curr, prev_f);
@@ -104,7 +112,7 @@ static void merge_free(master *m, header *curr){
 	if(next) next->length = CLEAR_PREV_INUSE(next->length);
 
 	if(next && !IS_USED(next->length)) {
-		f_header *next_f = (f_header *)((char *)next + sizeof(header) + GET_SIZE(next->length) - sizeof(header));
+		f_header *next_f = (f_header *)((char *)next + sizeof(header) + GET_SIZE(next->length) - sizeof(f_header));
 		if(next_f->next){
 			printf("next_f->next: %p\n", next_f->next);
 			header *next_next = next_f->next;
@@ -118,9 +126,10 @@ static void merge_free(master *m, header *curr){
 }
 
 static void add_to_free(master *m, header *curr){
-	curr->length = SET_FREE(curr->length);
+	curr->length = SET_FREE(GET_SIZE(curr->length));
 	size_t curr_size = GET_SIZE(curr->length);
 	f_header *curr_f = (f_header *)((char *)curr + sizeof(header) + curr_size - sizeof(f_header));
+	curr_f->head = curr;
 
 	printf("m->tail: %p ", m->tail);
 	printf("curr: %p\n", curr);
@@ -129,28 +138,21 @@ static void add_to_free(master *m, header *curr){
 	} else {
 		printf("set PREV_INUSED\n");
 		header *next = (header *)((char *)curr + sizeof(header) + GET_SIZE(curr->length));
-		if(!IS_USED(next->length)) next->length = CLEAR_PREV_INUSE(next->length);
-		else printf("else didnt set PREV_INUSED");
+		next->length = CLEAR_PREV_INUSE(next->length);
 	}
 	dump_a(m);
 
 	uint8_t i = 0;
 	while(i < BINS){
 		if(size_freelist[i] * 2 >= curr_size && curr_size >= size_freelist[i]){
-			if(!m->freelist[i]){
-				m->freelist[i] = curr;
-				curr_f->next = NULL;
-				curr_f->prev = NULL;
-				return;
-			}
+			curr_f->next = m->freelist[i];
+			curr_f->prev = NULL;
 			if(m->freelist[i]){
-				f_header *head_f = (f_header *)((char *)m->freelist[i] + GET_SIZE(m->freelist[i]->length) - sizeof(f_header) + sizeof(header));
-				head_f->prev = curr;
-				curr_f->next = m->freelist[i];
-				curr_f->prev = NULL;
-				m->freelist[i] = curr;
-				return;
+				f_header *old_head_f = (f_header *)((char *)m->freelist[i] + sizeof(header) + GET_SIZE(m->freelist[i]->length) - sizeof(f_header));
+				old_head_f->prev = curr;
 			}
+			m->freelist[i] = curr;
+			break;
 		}
 		i++;
 	}
@@ -169,18 +171,18 @@ static void *remove_from_free(master *m, size_t requested){
 				if(free && free->length >= requested){
 					if(free_f->prev){
 						header *prev = free_f->prev;
-						f_header *prev_f = (f_header *)((char *)prev + prev->length - sizeof(f_header) + sizeof(header));
+						f_header *prev_f = (f_header *)((char *)prev + GET_SIZE(prev->length) - sizeof(f_header) + sizeof(header));
 						if(free_f->next) prev_f->next = free_f->next;
 						else prev_f->next = NULL;
 					}
 					if(free_f->next){
 						header *next = free_f->next;
-						f_header *next_f = (f_header *)((char *)next + next->length - sizeof(f_header) + sizeof(header));
+						f_header *next_f = (f_header *)((char *)next + GET_SIZE(next->length) - sizeof(f_header) + sizeof(header));
 						if(free_f->prev) next_f->prev = free_f->prev;
 						else next_f->prev = NULL;
 					}
 					// free = split_block(m, (void *)free->data, requested);
-					SET_USED(free->length);
+					free->length = SET_USED(free->length);
 					return free;
 				};
 			}
@@ -210,7 +212,7 @@ static void *split_block(master *m, void **ptr, size_t requested){
 	if(requested + sizeof(header) < curr_length){
 		header *split = (header *)((char *)curr + sizeof(header) + GET_SIZE(curr_length) - requested - sizeof(header));
 		split->length = requested - sizeof(header);
-		SET_USED(split->length);
+		split->length = SET_USED(split->length);
 		curr->length -= requested + sizeof(header);
 		sfree(m, (void *)curr->data);
 		return split;
@@ -236,8 +238,8 @@ bool sinit(master *m, size_t size){
 }
 
 void *salloc(master *m, size_t requested) {
-	requested = ALIGN(requested);
 	if(requested <= sizeof(f_header)) requested = sizeof(f_header);
+	requested = ALIGN(requested);
 	header *c = NULL;
 	c = remove_from_free(m, requested);
 	if(c) return c->data;
@@ -312,15 +314,17 @@ void dump_f(master *m) {
 		if(m->freelist[i]) c = m->freelist[i];
 		size_t nmr = 0;
 		printf("m->freelist: %p freelist_size: %zu sizeof(f_header): %zu sizeof(header): %zu \n", m->freelist, size_freelist[i], sizeof(f_header), sizeof(header));
-		while(c){
+		while(c && nmr < 100){
 			f_header *cf = (f_header*)((char *)c + sizeof(header) + GET_SIZE(c->length) - sizeof(f_header));
 			void *next = NULL;
 			void *prev = NULL;
+			void *header = NULL;
 			if(cf->next) next = cf->next;
 			if(cf->prev) prev = cf->prev;
+			if(cf->head) header = cf->head;
 			//Count | ptr | Free/Used | length 
-			printf("%zu | node: %p | %d, %d | length: %zu | next: %p | prev: %p\n",
-					nmr, c, IS_USED(c->length), PREV_INUSE(c->length), GET_SIZE(c->length), next, prev );
+			printf("%zu | node: %p | %d, %d | length: %zu | next: %p | prev: %p | header: %p\n",
+					nmr, c, IS_USED(c->length), PREV_INUSE(c->length), GET_SIZE(c->length), next, prev, header );
 			nmr++;
 			c = cf->next; 
 		}
@@ -335,15 +339,17 @@ void dump_a(master *m) {
 	void *end = ((char *)c + sizeof(header) + GET_SIZE(c->length));
 	printf("dump_a\n");
 	printf("m->freelist: %p\n", m->freelist);
-	while(c && c->length && (char *)end < (char *)m->end){
+	while(c && c->length && (char *)end < (char *)m->end && nmr < 100){
 		f_header *cf = (f_header*)((char *)c + sizeof(header) + GET_SIZE(c->length) - sizeof(f_header));
 		void *next = NULL;
 		void *prev = NULL;
+		void *head = NULL;
 		if(cf->next) next = cf->next;
 		if(cf->prev) prev = cf->prev;
+		if(cf->head) head = cf->head;
 	//Count | ptr | Free/Used, prev_free | length 
-	printf("%zu | node: %p | %d, %d | length: %zu | next: %p | prev: %p\n",
-	nmr, c, IS_USED(c->length), PREV_INUSE(c->length), GET_SIZE(c->length),  next, prev );
+	printf("%zu | node: %p | %d, %d | length: %zu | next: %p | prev: %p | header: %p\n",
+	nmr, c, IS_USED(c->length), PREV_INUSE(c->length), GET_SIZE(c->length), next, prev, head );
 	nmr++;
 	end = ((char *)c + sizeof(header) + GET_SIZE(c->length));
 	c = (header *)((char *)c + GET_SIZE(c->length) + sizeof(header));
