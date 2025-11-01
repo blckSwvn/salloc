@@ -4,17 +4,17 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-typedef struct header header;
+struct header;
 
 #define BINS 16
 
 typedef struct master {
 	void *base;
 	void *end;
-	size_t mem_used;
-	size_t mem_free;
-	header *tail;
-	header *freelist[BINS]; //segregated freelist, smalles size class is 16
+	size_t used;
+	size_t free;
+	struct header *tail;
+	struct header *freelist[BINS]; //segregated freelist, smalles size class is 16
 } master;
 
 bool sinit(master *m, size_t requested);
