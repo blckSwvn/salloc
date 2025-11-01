@@ -6,11 +6,14 @@
 #include <string.h>
 #include <stddef.h>
 
-typedef struct header {
+#define ALIGN_TO 16
+
+typedef struct __attribute__((aligned(ALIGN_TO))) header {
 	size_t length;
 	char data[];
 } header;
 
+//footer is stored in the char data[] after its been sfreed
 typedef struct footer {
 	header *head;
 	header *next;
@@ -25,7 +28,7 @@ typedef struct master {
 	size_t used;
 	size_t free;
 	header *tail;
-	header *freelist[BINS]; //segregated freelist, smalles size class is 16
+	header *freelist[BINS];
 } master;
 
 #define USED_BIT        ((size_t)1)  // block is allocated
@@ -45,54 +48,27 @@ typedef struct master {
 #define SET_PREV_INUSE(h) ((h) | PREV_INUSE_BIT)
 #define CLEAR_PREV_INUSE(h) ((h) & ~PREV_INUSE_BIT)
 
-#define ALIGN_TO 16
 #define ALIGN(size) (((size) + ((ALIGN_TO)-1)) & ~((ALIGN_TO)-1))
 
-//should trunkate to amount of bins automatically
 static const size_t size_freelist[BINS] = {
-	16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072,
-	262144, 524288, 1048576, 2097152
-//	1,  2,  3,  4,   5,   6,   7,    8,    9,    10,   11,    12,	 13,	14,
-//	15,	16,
+	32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072,
+	262144, 524288, 1048576
+//	1,  2,  3,   4,   5,   6,    7,    8,    9,    10,    11,    12,    13,
+//	14,     15,	16,
 };
+
 
 static inline footer *get_footer(header *curr){
 	return (footer *)((char *)curr + sizeof(header) + GET_SIZE(curr->length) - sizeof(footer));
 }
 
-static void merge_free(master *m, header *curr){
-	footer *prev_f = NULL;
-	header *prev = NULL;
-	header *next = (header *)((char *)curr + sizeof(header) + GET_SIZE(curr->length));
-	header *next_next = NULL;
-
-	if(!PREV_INUSE(curr->length) && m->base != curr) {
-		prev_f = (footer *)((char *)curr - (sizeof(footer) + sizeof(header)));
-	} else printf("PREV_INUSE\n");
-
-
-	if(next) next->length = CLEAR_PREV_INUSE(next->length);
-
-	if(next && !IS_USED(next->length)) {
-		footer *next_f = (footer *)((char *)next + sizeof(header) + GET_SIZE(next->length) - sizeof(footer));
-		if(next_f->next){
-			printf("next_f->next: %p\n", next_f->next);
-			header *next_next = next_f->next;
-			footer *next_next_f = (footer *)((char *)next_next + GET_SIZE(next_next->length) - sizeof(footer) + sizeof(header));
-			if(prev) next_next_f->prev = prev;
-			else next_next_f->prev = NULL;
-		}
-		if(prev) prev_f->next = next_next;
-		else if(prev_f) prev_f->next = NULL;
-	} 
-}
 
 static void add_to_free(master *m, header *curr, footer *curr_f){
 	curr_f->head = curr;
 	uint8_t i = 0;
 	while(i < BINS){
 		size_t list_size = size_freelist[i];
-		if(list_size * 2 >= curr->length && curr->length >= list_size){
+		if(list_size * 2 >= GET_SIZE(curr->length) && GET_SIZE(curr->length) >= list_size){
 			break;
 		}
 		i++;
@@ -108,34 +84,33 @@ static void add_to_free(master *m, header *curr, footer *curr_f){
 }
 
 
-static void remove_from_free(master *m, header *curr){
-	footer *curr_f = get_footer(curr);
-	header *prev = NULL;
-	footer *prev_f = NULL;
-	header *next = NULL;
-	footer *next_f = NULL;
-
-	if(curr_f->prev){
-		header *prev = curr_f->prev;
-		footer *prev_f = get_footer(prev);
-	}
-	if(curr_f->next){
-		header *next = curr_f->next;
-		footer *next_f = get_footer(next);
-		if(prev){
-			next_f->prev = prev;
-			prev_f->next = next;
-		} else {
-			next_f->prev = NULL;
+static void remove_from_free(master *m, header *curr, footer *curr_f){
+	uint8_t i = 0;
+	while(i < BINS){
+		size_t list_size = size_freelist[i];
+		if(list_size * 2 >= GET_SIZE(curr->length) && GET_SIZE(curr->length) >= list_size){
+			break;
 		}
-		return;
+		i++;
 	}
-	if(curr_f->prev) prev_f->next = NULL;
+	header *prev = curr_f->prev;
+	header *next = curr_f->next;
+
+	if(prev){
+		footer *prev_f = get_footer(prev);
+		prev_f->next = next;
+	} else {
+		m->freelist[i] = next;
+	}
+
+	if(next){
+		footer *next_f = get_footer(next);
+		next_f->prev = prev;
+	}
 }
 
 
 void sfree(master *m, void *ptr) {
-
     header *curr = (header *)((char *)ptr - offsetof(header, data));
     size_t curr_size = GET_SIZE(curr->length);
     footer *curr_f = get_footer(curr);
@@ -144,11 +119,49 @@ void sfree(master *m, void *ptr) {
     m->free += total;
     m->used -= total;
 
-    header *next = (header *)((char *)curr + total);
-    if(next)next->length = CLEAR_PREV_INUSE(next->length);
-
-    add_to_free(m, curr, curr_f);
     curr->length = SET_FREE(curr->length);
+    add_to_free(m, curr, curr_f);
+
+    //performance sake to check null than if(m->tail = curr) again
+    header *next = NULL;
+
+    //merge forward
+    if(m->tail != curr){
+	    next = (header *)((char *)curr + sizeof(header) + GET_SIZE(curr->length));
+	    if(m->tail == next) m->tail = curr;
+
+	    if(!IS_USED(next->length)){
+		    footer *next_f = get_footer(next);
+		    remove_from_free(m, next, next_f);
+		    remove_from_free(m, curr, curr_f);
+
+		    curr->length += sizeof(header) + GET_SIZE(next->length);
+		    curr->length = SET_PREV_INUSE(curr->length);
+
+		    footer *new_f = get_footer(curr);
+
+		    add_to_free(m, curr, new_f);
+	    }
+    } 
+    
+    //merges backwards
+    if(!PREV_INUSE(curr->length)){
+	    footer *prev_f = (footer *)((char *)curr - sizeof(footer));
+	    header *prev = prev_f->head;
+
+	    if(next) m->tail = prev;
+
+	    if(IS_USED(prev->length)) return;
+
+	    remove_from_free(m, prev, prev_f);
+	    remove_from_free(m, curr, curr_f);
+
+	    prev->length += total;
+	    prev->length = SET_PREV_INUSE(prev->length);
+
+	    footer *new_f = get_footer(prev);
+	    add_to_free(m, prev, new_f);
+    }
 }
 
 
@@ -169,6 +182,7 @@ bool sinit(master *m, size_t size){
 	return true;
 }
 
+
 void *salloc(master *m, size_t requested) {
 	if(requested <= sizeof(footer)) requested = sizeof(footer);
 	requested = ALIGN(requested);
@@ -187,7 +201,7 @@ void *salloc(master *m, size_t requested) {
 	while(curr){
 		footer *curr_f = get_footer(curr);
 		if(curr->length >= requested){
-			remove_from_free(m, curr);
+			remove_from_free(m, curr, curr_f);
 			curr->length = SET_USED(curr->length);
 
 			m->used += sizeof(header) + GET_SIZE(curr->length);
@@ -197,22 +211,21 @@ void *salloc(master *m, size_t requested) {
 		else curr = curr_f->next;
 	}
 
-
 	if(m->tail){
 		curr = (header *)((char *)m->tail + sizeof(header) + GET_SIZE(m->tail->length));
 		m->tail = curr;
-		curr->length = SET_USED(requested);
 	} else {
 		curr = m->base;
 		m->tail = curr;
-		curr->length = requested;
 	}
 
+	curr->length = SET_USED(requested);
 	curr->length = SET_PREV_INUSE(curr->length);
 	m->used += sizeof(header) + GET_SIZE(curr->length);
 	m->free -= sizeof(header) + GET_SIZE(curr->length);
 	return curr->data;
 }
+
 
 void dump_f(master *m) {
 	uint8_t i = 0;
@@ -242,6 +255,7 @@ void dump_f(master *m) {
 	}
 }
 
+
 void dump_a(master *m) {
 	header *c = (header *)m->base;
 	size_t nmr = 0;
@@ -265,4 +279,5 @@ void dump_a(master *m) {
 	}
 	printf("\n");
 }
+
 
