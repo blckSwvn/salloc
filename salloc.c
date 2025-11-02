@@ -1,4 +1,6 @@
+#include "sys/cdefs.h"
 #include <sys/mman.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -14,7 +16,7 @@ typedef struct __attribute__((aligned(ALIGN_TO))) header {
 } header;
 
 //footer is stored in the char data[] after its been sfreed
-typedef struct footer {
+typedef struct __attribute__((aligned(ALIGN_TO))) footer {
 	header *head;
 	header *next;
 	header *prev;
@@ -63,16 +65,22 @@ static inline footer *get_footer(header *curr){
 }
 
 
-static void add_to_free(master *m, header *curr, footer *curr_f){
-	curr_f->head = curr;
+static inline uint8_t get_list(size_t size){
 	uint8_t i = 0;
 	while(i < BINS){
 		size_t list_size = size_freelist[i];
-		if(list_size * 2 >= GET_SIZE(curr->length) && GET_SIZE(curr->length) >= list_size){
-			break;
+		if(list_size * 2 >= size && size >= list_size){
+			return i;
 		}
 		i++;
 	}
+	return BINS - 1;
+}
+
+
+static void add_to_free(master *m, header *curr, footer *curr_f){
+	curr_f->head = curr;
+	uint8_t i = get_list(curr->length);
 	if(m->freelist[i]){
 		footer *old_head_f = get_footer(m->freelist[i]);
 		old_head_f->prev = curr;
@@ -85,14 +93,7 @@ static void add_to_free(master *m, header *curr, footer *curr_f){
 
 
 static void remove_from_free(master *m, header *curr, footer *curr_f){
-	uint8_t i = 0;
-	while(i < BINS){
-		size_t list_size = size_freelist[i];
-		if(list_size * 2 >= GET_SIZE(curr->length) && GET_SIZE(curr->length) >= list_size){
-			break;
-		}
-		i++;
-	}
+	uint8_t i = get_list(curr->length);
 	header *prev = curr_f->prev;
 	header *next = curr_f->next;
 
@@ -110,7 +111,7 @@ static void remove_from_free(master *m, header *curr, footer *curr_f){
 }
 
 
-void sfree(master *m, void *ptr) {
+void sfree(master *m, void *ptr){
     header *curr = (header *)((char *)ptr - offsetof(header, data));
     size_t curr_size = GET_SIZE(curr->length);
     footer *curr_f = get_footer(curr);
@@ -183,33 +184,35 @@ bool sinit(master *m, size_t size){
 }
 
 
-void *salloc(master *m, size_t requested) {
+void *salloc(master *m, size_t requested){
 	if(requested <= sizeof(footer)) requested = sizeof(footer);
 	requested = ALIGN(requested);
 
-	uint8_t i = 0;
-	while(i < BINS){
-		size_t list_size = size_freelist[i];
-		if(list_size * 2 >= requested && requested >= list_size){
-			if(m->freelist[i]) break;
-		}
-		i++;
-	}
 
-	header *curr = NULL;
-	if(i < BINS) curr = m->freelist[i];
+	uint8_t i = get_list(requested);
+	printf("i: %i", i);
+
+	header *curr = m->freelist[i];
+	footer *curr_f = NULL;
 	while(curr){
-		footer *curr_f = get_footer(curr);
-		if(curr->length >= requested){
-			remove_from_free(m, curr, curr_f);
-			curr->length = SET_USED(curr->length);
-
-			m->used += sizeof(header) + GET_SIZE(curr->length);
-			m->free -= sizeof(header) + GET_SIZE(curr->length);
-			return curr->data;
-		} 
-		else curr = curr_f->next;
+		curr_f = get_footer(curr);
+		if(curr->length > requested) break;
+		curr = curr_f->next;
 	}
+
+	if(curr){
+		if (curr->length >= requested){
+			curr->length = SET_USED(curr->length);
+			return curr->data;
+
+		}
+		m->free -= GET_SIZE(curr->length) + sizeof(header);
+		m->used += GET_SIZE(curr->length) + sizeof(header);
+		return curr->data;
+	} else {
+		printf("!curr\n");
+	}
+
 
 	if(m->tail){
 		curr = (header *)((char *)m->tail + sizeof(header) + GET_SIZE(m->tail->length));
@@ -219,15 +222,14 @@ void *salloc(master *m, size_t requested) {
 		m->tail = curr;
 	}
 
-	curr->length = SET_USED(requested);
-	curr->length = SET_PREV_INUSE(curr->length);
+	curr->length = SET_PREV_INUSE(SET_USED(requested));
 	m->used += sizeof(header) + GET_SIZE(curr->length);
 	m->free -= sizeof(header) + GET_SIZE(curr->length);
 	return curr->data;
 }
 
 
-void dump_f(master *m) {
+void dump_f(master *m){
 	uint8_t i = 0;
 	printf("dump_f\n");
 	printf("sizeof(footer): %zu, sizeof(header): %zu\n", sizeof(footer), sizeof(header));
@@ -256,7 +258,7 @@ void dump_f(master *m) {
 }
 
 
-void dump_a(master *m) {
+void dump_a(master *m){
 	header *c = (header *)m->base;
 	size_t nmr = 0;
 	void *end = ((char *)c + sizeof(header) + GET_SIZE(c->length));
