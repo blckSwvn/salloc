@@ -20,6 +20,7 @@ typedef struct master {
 bool sinit(master *m, size_t requested);
 void *salloc(master *m, size_t requested);
 void sfree(master *m, void **ptr);
+void skill(master *m);
 // void *srealloc(master *m, void *ptr, size_t requested);
 void dump_a(master *m);
 void dump_f(master *m);

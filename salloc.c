@@ -1,4 +1,4 @@
-#include "sys/cdefs.h"
+#include <math.h>
 #include <sys/mman.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -15,7 +15,7 @@ typedef struct __attribute__((aligned(ALIGN_TO))) header {
 	char data[];
 } header;
 
-//footer is stored in the char data[] after its been sfreed
+//footer is stored in the char data[] after its been sfreed, also aligned to 16 to make all math 16 aligned
 typedef struct __attribute__((aligned(ALIGN_TO))) footer {
 	header *head;
 	header *next;
@@ -110,7 +110,6 @@ static void remove_from_free(master *m, header *curr, footer *curr_f){
 	}
 }
 
-
 void sfree(master *m, void *ptr){
     header *curr = (header *)((char *)ptr - offsetof(header, data));
     size_t curr_size = GET_SIZE(curr->length);
@@ -176,11 +175,55 @@ bool sinit(master *m, size_t size){
 	m->free = size;
 	m->tail = NULL;
 
-	for(int i = 0; i < BINS; i++){
+	uint8_t i = 0;
+	while(i < BINS){
 		m->freelist[i] = NULL;
+		i++;
 	}
 
 	return true;
+}
+
+
+void skill(master *m){
+	munmap(m->base, (char *)m->end - (char *)m->base);
+	m->base = NULL;
+	m->end = NULL;
+	m->used = (size_t)NULL;
+	m->free = (size_t)NULL;
+	m->tail = NULL;
+
+	uint8_t i = 0;
+	while(i < BINS){
+		m->freelist[i] = NULL;
+		i++;
+	}
+}
+
+
+static inline void *split(master m, header *curr, footer *curr_f, size_t requested){
+	size_t new_len = GET_SIZE(curr->length) - (sizeof(header) + requested);
+	printf("new_len: %zu\n", new_len);
+	if(sizeof(footer) >= new_len) return curr;
+
+	printf("curr: %p\n", curr);
+
+	remove_from_free(&m, curr, curr_f);
+
+	// size_t new_len = GET_SIZE(curr->length) - (sizeof(header) + requested);
+	new_len = ALIGN(new_len);
+	header *new = (header *)((char *)curr + new_len);
+	new->length = SET_USED(requested);
+	new->length = CLEAR_PREV_INUSE(new->length);
+
+	curr->length = SET_USED(new_len);
+	curr->length = SET_PREV_INUSE(curr->length);
+	footer *new_curr_f = get_footer(curr);
+	printf("new_curr_f: %p\n", new_curr_f);
+	printf("new: %p", new);
+
+	add_to_free(&m, curr, curr_f);
+	return new->data;
 }
 
 
@@ -188,9 +231,16 @@ void *salloc(master *m, size_t requested){
 	if(requested <= sizeof(footer)) requested = sizeof(footer);
 	requested = ALIGN(requested);
 
+	if(m->used == 0){
+		uint8_t i = 0;
+		while(i < BINS){
+			m->freelist[i] = NULL;
+			i++;
+		}
+		m->tail = NULL;
+	}
 
 	uint8_t i = get_list(requested);
-	printf("i: %i", i);
 
 	header *curr = m->freelist[i];
 	footer *curr_f = NULL;
@@ -201,7 +251,11 @@ void *salloc(master *m, size_t requested){
 	}
 
 	if(curr){
-		if (curr->length >= requested){
+		header *new = split(*m, curr, curr_f, requested);
+		curr = new;
+		if (!new && curr->length >= requested){
+			curr_f = get_footer(curr);
+			remove_from_free(m, curr, curr_f);
 			curr->length = SET_USED(curr->length);
 			return curr->data;
 
@@ -210,7 +264,7 @@ void *salloc(master *m, size_t requested){
 		m->used += GET_SIZE(curr->length) + sizeof(header);
 		return curr->data;
 	} else {
-		printf("!curr\n");
+		printf("!curr: %p\n", curr);
 	}
 
 
