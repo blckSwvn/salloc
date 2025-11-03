@@ -1,4 +1,3 @@
-#include <math.h>
 #include <sys/mman.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -55,8 +54,8 @@ typedef struct master {
 static const size_t size_freelist[BINS] = {
 	32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072,
 	262144, 524288, 1048576
-//	1,  2,  3,   4,   5,   6,    7,    8,    9,    10,    11,    12,    13,
-//	14,     15,	16,
+		//	1,  2,  3,   4,   5,   6,    7,    8,    9,    10,    11,    12,    13,
+		//	14,     15,	16,
 };
 
 
@@ -111,57 +110,57 @@ static void remove_from_free(master *m, header *curr, footer *curr_f){
 }
 
 void sfree(master *m, void *ptr){
-    header *curr = (header *)((char *)ptr - offsetof(header, data));
-    size_t curr_size = GET_SIZE(curr->length);
-    footer *curr_f = get_footer(curr);
-    size_t total = sizeof(header) + curr_size;
+	header *curr = (header *)((char *)ptr - offsetof(header, data));
+	size_t curr_size = GET_SIZE(curr->length);
+	footer *curr_f = get_footer(curr);
+	size_t total = sizeof(header) + curr_size;
 
-    m->free += total;
-    m->used -= total;
+	m->free += total;
+	m->used -= total;
 
-    curr->length = SET_FREE(curr->length);
-    add_to_free(m, curr, curr_f);
+	curr->length = SET_FREE(curr->length);
+	add_to_free(m, curr, curr_f);
 
-    //performance sake to check null than if(m->tail = curr) again
-    header *next = NULL;
+	//performance sake to check null than if(m->tail = curr) again
+	header *next = NULL;
 
-    //merge forward
-    if(m->tail != curr){
-	    next = (header *)((char *)curr + sizeof(header) + GET_SIZE(curr->length));
-	    if(m->tail == next) m->tail = curr;
+	//merge forward
+	if(m->tail != curr){
+		next = (header *)((char *)curr + sizeof(header) + GET_SIZE(curr->length));
+		if(m->tail == next) m->tail = curr;
 
-	    if(!IS_USED(next->length)){
-		    footer *next_f = get_footer(next);
-		    remove_from_free(m, next, next_f);
-		    remove_from_free(m, curr, curr_f);
+		if(!IS_USED(next->length)){
+			footer *next_f = get_footer(next);
+			remove_from_free(m, next, next_f);
+			remove_from_free(m, curr, curr_f);
 
-		    curr->length += sizeof(header) + GET_SIZE(next->length);
-		    curr->length = SET_PREV_INUSE(curr->length);
+			curr->length += sizeof(header) + GET_SIZE(next->length);
+			curr->length = SET_PREV_INUSE(curr->length);
 
-		    footer *new_f = get_footer(curr);
+			footer *new_f = get_footer(curr);
 
-		    add_to_free(m, curr, new_f);
-	    }
-    } 
-    
-    //merges backwards
-    if(!PREV_INUSE(curr->length)){
-	    footer *prev_f = (footer *)((char *)curr - sizeof(footer));
-	    header *prev = prev_f->head;
+			add_to_free(m, curr, new_f);
+		}
+	} 
 
-	    if(next) m->tail = prev;
+	//merges backwards
+	if(!PREV_INUSE(curr->length)){
+		footer *prev_f = (footer *)((char *)curr - sizeof(footer));
+		header *prev = prev_f->head;
 
-	    if(IS_USED(prev->length)) return;
+		if(next) m->tail = prev;
 
-	    remove_from_free(m, prev, prev_f);
-	    remove_from_free(m, curr, curr_f);
+		if(IS_USED(prev->length)) return;
 
-	    prev->length += total;
-	    prev->length = SET_PREV_INUSE(prev->length);
+		remove_from_free(m, prev, prev_f);
+		remove_from_free(m, curr, curr_f);
 
-	    footer *new_f = get_footer(prev);
-	    add_to_free(m, prev, new_f);
-    }
+		prev->length += total;
+		prev->length = SET_PREV_INUSE(prev->length);
+
+		footer *new_f = get_footer(prev);
+		add_to_free(m, prev, new_f);
+	}
 }
 
 
