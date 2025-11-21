@@ -318,7 +318,8 @@ void dump_a(master *m){
 	printf("dump_a\n");
 	printf("m free: %zu, used: %zu, base: %p, tail: %p\n", m->free, m->used, m->base, m->tail);
 	while(c && c->length && (char *)end < (char *)m->end && nmr < 100){
-		footer *cf = (footer*)((char *)c + sizeof(header) + GET_SIZE(c->length) - sizeof(footer));
+		footer *cf = get_footer(c);
+
 		void *next = NULL;
 		void *prev = NULL;
 		void *head = NULL;
@@ -334,5 +335,3 @@ void dump_a(master *m){
 	}
 	printf("\n");
 }
-
-
